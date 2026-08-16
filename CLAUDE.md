@@ -79,6 +79,8 @@ python3 cli/arena.py --help
 - **One-way canonicality.** ADL semantics flow down from the lab; findings flow
   up via `docs/FINDINGS.md` + the lab's open-spec-review intake. Never redefine
   an ADL semantic here. Arena-local vocabulary lives under `extensions.x-arena`.
+  File findings upstream **at discovery time** and record the disposition in the
+  FINDINGS register (T-093 enforces completeness) — never batch them (GE03).
 - **Provisional price.** Specialist price is `x-arena.price` pending ADL v0.3
   (finding F-007). Only `core.arena.advertised_price` may read it.
 - **Automation pause.** No new `*_packet` / `*_gate` / `*_handoff` /

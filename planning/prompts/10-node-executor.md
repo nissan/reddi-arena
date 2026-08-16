@@ -45,7 +45,7 @@ Do not absorb these into the current implementation merely because you can.
 
 ## Engineering loop
 
-1. DISCOVER: inspect current behavior, tests, relevant history and predecessor evidence.
+1. DISCOVER: inspect current behavior, tests, relevant history and predecessor evidence. State explicitly whether the node's binding artifact is stale relative to the implementation (built already / partially built / greenfield) — stale O-tasks convert to verify-and-freeze work, they are not re-implemented (GE03, A4 lesson).
 2. PLAN: state the smallest coherent change and verification strategy.
 3. IMPLEMENT: make atomic commits; avoid unrelated cleanup.
 4. VERIFY: run node tests plus repository-required regression/security/lint checks.
