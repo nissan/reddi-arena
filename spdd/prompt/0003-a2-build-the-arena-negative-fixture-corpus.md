@@ -11,9 +11,12 @@ Invalid documents must fail for the stated reason, not incidentally.
 
 **DoD checklist:**
 
-- [ ] Every negative fixture fails validation
-- [ ] Every negative fixture asserts a specific diagnostic, not a generic failure
-- [ ] Zero negative fixtures pass silently
+- [x] Every negative fixture fails validation (21 schema-invalid, each with a
+      declared path+message diagnostic; 3 documented-gap fixtures are
+      schema-valid **by design** and are rejected by the Arena-local lint or
+      the conformance checker — see Sync Log)
+- [x] Every negative fixture asserts a specific diagnostic, not a generic failure
+- [x] Zero negative fixtures pass silently
 
 ## E — Entities / Handoff Objects
 
@@ -90,3 +93,4 @@ Fixtures are review artifacts; they do not define new ADL semantics.
 | Date | Divergence | Artifact update | Code/test update |
 |---|---|---|---|
 | 2026-08-05 | Generated from plan/backlog.yaml (ready) | initial | n/a |
+| 2026-08-16 | Corpus is generated (tools/gen_negative_fixtures.py), not hand-authored: each fixture is the reference defender with ONE targeted break, and the generator verifies every declared diagnostic against the pinned schema at generation time, refusing to write a corpus that misbehaves. Building it surfaced two NEW schema gaps the O-tasks implied were failures but are not: duplicate tool ids (F-010) and unknown tool keys / sideEffect typo (F-011) — both schema-valid, both now caught by an Arena-local lint in validate_adl.py and logged in docs/FINDINGS.md. "Zero fixtures pass silently" is honored via the manifest contract: schema-valid gap fixtures must be flagged and lint-rejected, or the validator exits nonzero. | DoD checked; this row | fixtures/negative/: 24 fixtures + manifest.yaml; validate_adl.py manifest-driven T-003/T-004 + arena_lint; tests/test_arena.py +5 checks (suite 63→68). Executed as graph node A2 (branch node/A2-negative-fixture-corpus) under the GE01 pilot. |

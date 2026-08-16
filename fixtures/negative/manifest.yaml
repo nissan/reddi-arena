@@ -1,0 +1,164 @@
+bare-string-instructions.yaml:
+  expect:
+    message: is not of type 'object'
+    path: harness/instructions
+  expectSchemaValid: false
+  lint: null
+  reason: instructions must be an object, not a bare string (D-01 class)
+charge-intent-unbounded.yaml:
+  expectSchemaValid: true
+  finding: F-001
+  lint: null
+  reason: minimal charge intent with no envelope — schema-valid, conformance Level 0 fail
+    (F-001)
+duplicate-tool-id.yaml:
+  expectSchemaValid: true
+  finding: F-010
+  lint: duplicate-id
+  reason: two tools share one id — schema accepts this (F-010 gap)
+extensions-unprefixed-namespace.yaml:
+  expect:
+    message: '''arena'''
+    path: extensions
+  expectSchemaValid: false
+  lint: null
+  reason: extension namespaces must be x- prefixed
+harness-missing-runtime.yaml:
+  expect:
+    message: '''runtime'' is a required property'
+    path: harness
+  expectSchemaValid: false
+  lint: null
+  reason: harness.runtime is required (D-15)
+instructions-inline-and-path.yaml:
+  expect:
+    message: is not valid under any of the given schemas
+    path: harness/instructions
+  expectSchemaValid: false
+  lint: null
+  reason: instructions must choose inline OR path, not both
+memory-retention-object.yaml:
+  expect:
+    message: is not of type 'string'
+    path: harness/memory/retention
+  expectSchemaValid: false
+  lint: null
+  reason: memory.retention is a string; scope is separate (D-12)
+metadata-missing-description.yaml:
+  expect:
+    message: '''description'' is a required property'
+    path: metadata
+  expectSchemaValid: false
+  lint: null
+  reason: metadata.description is required
+metadata-name-uppercase.yaml:
+  expect:
+    message: does not match
+    path: metadata/name
+  expectSchemaValid: false
+  lint: null
+  reason: metadata.name must match the lowercase slug pattern
+missing-apiversion.yaml:
+  expect:
+    message: '''apiVersion'' is a required property'
+    path: <root>
+  expectSchemaValid: false
+  lint: null
+  reason: apiVersion is required at the root
+missing-model.yaml:
+  expect:
+    message: '''model'' is a required property'
+    path: <root>
+  expectSchemaValid: false
+  lint: null
+  reason: model is required at the root
+modality-undeclared-enum.yaml:
+  expect:
+    message: is not one of
+    path: model/requirements/modalities/0
+  expectSchemaValid: false
+  lint: null
+  reason: modalities are a closed enum
+model-missing-requirements.yaml:
+  expect:
+    message: '''requirements'' is a required property'
+    path: model
+  expectSchemaValid: false
+  lint: null
+  reason: model.requirements is required
+observability-unknown-event.yaml:
+  expect:
+    message: is not one of
+    path: harness/observability/events
+  expectSchemaValid: false
+  lint: null
+  reason: observability event names are a closed enum (D-13)
+policy-enforcement-bad-phase.yaml:
+  expect:
+    message: is not one of
+    path: harness/policies/0/enforcement/phase
+  expectSchemaValid: false
+  lint: null
+  reason: enforcement phase enum excludes pre-invocation (D-11)
+policy-scope-bad-type.yaml:
+  expect:
+    message: is not one of
+    path: harness/policies/0/scope/type
+  expectSchemaValid: false
+  lint: null
+  reason: policy scope.type is a closed enum (D-10)
+source-check-as-string.yaml:
+  expect:
+    message: is not of type 'object'
+    path: harness/dataSources/0/sourceCheck
+  expectSchemaValid: false
+  lint: null
+  reason: sourceCheck is an object with required/expectation (D-06)
+source-citation-as-string.yaml:
+  expect:
+    message: is not of type 'boolean'
+    path: harness/dataSources/0/citationRequired
+  expectSchemaValid: false
+  lint: null
+  reason: citationRequired is a boolean, not a keyword (D-05)
+source-file-missing-path.yaml:
+  expect:
+    message: '''path'' is a required property'
+    path: harness/dataSources/0
+  expectSchemaValid: false
+  lint: null
+  reason: type:file sources require a separate path (D-07)
+source-ref-prefix-mismatch.yaml:
+  expect:
+    message: does not match
+    path: harness/dataSources/0/sourceRef
+  expectSchemaValid: false
+  lint: null
+  reason: 'sourceRef must carry the file: prefix for file sources (D-07)'
+tool-dotted-id.yaml:
+  expect:
+    message: does not match
+    path: harness/tools/0/id
+  expectSchemaValid: false
+  lint: null
+  reason: ids may not contain dots (D-04)
+tool-missing-description.yaml:
+  expect:
+    message: '''description'' is a required property'
+    path: harness/tools/0
+  expectSchemaValid: false
+  lint: null
+  reason: tool.description is required
+tool-sideeffect-singular-typo.yaml:
+  expectSchemaValid: true
+  finding: F-011
+  lint: unknown-tool-key
+  reason: sideEffect (singular typo) silently accepted on a tool — schema accepts unknown
+    tool keys (F-011 gap); the declared side effects vanish
+wrong-kind.yaml:
+  expect:
+    message: '''Agent'' was expected'
+    path: kind
+  expectSchemaValid: false
+  lint: null
+  reason: kind must be the constant 'Agent'

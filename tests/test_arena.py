@@ -98,6 +98,24 @@ check("frozen spec: status is frozen, not draft",
 check("frozen spec: mid-season change path is a v0.2 formula spec",
       "v0.2" in _spec)
 
+print("negative-fixture corpus (A2: T-003 T-004)")
+import subprocess as _sp
+import yaml as _y
+_man = _y.safe_load((ROOT / "fixtures" / "negative" / "manifest.yaml").read_text())
+check("T-003 corpus has >= 20 fixtures, one per failure mode", len(_man) >= 20)
+check("T-003 every fixture declares a reason",
+      all(v.get("reason") for v in _man.values()))
+check("T-004 every schema-invalid fixture declares a specific diagnostic",
+      all(v.get("expect", {}).get("path") and v.get("expect", {}).get("message")
+          for v in _man.values() if not v["expectSchemaValid"]))
+check("T-004 every documented-gap fixture names its finding or lint",
+      all(v.get("finding") or v.get("lint")
+          for v in _man.values() if v["expectSchemaValid"]))
+_va = _sp.run([sys.executable, str(ROOT / "tools" / "validate_adl.py")],
+              capture_output=True, text=True, cwd=ROOT)
+check("T-003/T-004 validator enforces the manifest (zero silent passes)",
+      _va.returncode == 0 and "FAIL" not in _va.stdout)
+
 print("power-up actually changes outcomes")
 flips = sum(
     run_vault_match(DEF, RAID, seed=s)["winner"]
