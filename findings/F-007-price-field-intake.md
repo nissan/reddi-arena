@@ -3,6 +3,11 @@
 _Prepared for `docs/OPEN-SPEC-REVIEW-INTAKE.md` submission. Sanitized. No
 secrets, payloads, keys, or live data._
 
+**FILED 2026-08-16:** [nissan/reddiagent-lab#440](https://github.com/nissan/reddiagent-lab/issues/440)
+(companion F-002 filed as [#441](https://github.com/nissan/reddiagent-lab/issues/441);
+F-001 ablation evidence attached to
+[#389](https://github.com/nissan/reddiagent-lab/issues/389#issuecomment-5307173420)).
+
 ## Reviewer role
 
 Downstream implementer building a competitive arena (Reddi Arena) as a proof use

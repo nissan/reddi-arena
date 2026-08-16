@@ -41,7 +41,8 @@ which makes them useful documentation feedback.
 
 ### F-001 — Seller-side `charge` intents escape the authority envelope
 
-**STATUS: DUPLICATE — already known.** `docs/AGENT-TEAM-DELEGATION-EXAMPLES.md`
+**STATUS: DUPLICATE — already known. Evidence filed upstream 2026-08-16:**
+[reddiagent-lab#389 comment](https://github.com/nissan/reddiagent-lab/issues/389#issuecomment-5307173420). `docs/AGENT-TEAM-DELEGATION-EXAMPLES.md`
 in the lab records this as ADL v0.3 candidate #1 and #2, in almost the same
 words. My contribution is not the discovery; it is the executable reproduction
 and the ablation table below, which the existing note does not have. File as
@@ -96,6 +97,8 @@ only.** Arena cannot use conformance level as its safety gate and must inspect
 reads like a safety tier and is not one.
 
 ### F-002 — Currency enum excludes non-monetary units
+
+**Filed upstream 2026-08-16:** [reddiagent-lab#441](https://github.com/nissan/reddiagent-lab/issues/441).
 
 `currency` is closed to `USD`/`USDC`/`EUR`/`GBP`. A game economy using
 non-redeemable arena credits has nowhere to put them, so the Arena is forced to
