@@ -14,21 +14,34 @@ never fork: `nissan/reddi-agent-protocol` (product/programs) and
 
 ## Methodology — read this before writing code
 
-Work here follows the lab's SPDD approach with GitHub issues as the spine:
+Work here follows **graph engineering** (pilot since node GE01), which evolved
+from the lab's SPDD approach. A GitHub issue is an executable **graph node**;
+the engineering loop runs *inside* the node:
 
-1. **Every work loop anchors on one GitHub issue.** Each issue has a binding
-   REASONS-LITE artifact in `spdd/prompt/` (see `spdd/INDEX.md` for topological
-   order). Read the artifact in full before implementing; **update it in the
-   same PR** if your implementation materially diverges.
-2. **The graph decides the order.** `plan/backlog.yaml` is the canonical
-   dependency DAG; `tools/plan_lint.py` enforces its seven invariants and
-   `tools/generate_prompts.py` regenerates artifacts and the issue script from
-   it. Edit the plan, never the generated files.
-3. **Doneness is a passing test**, never a closed ticket. Every issue names its
-   tests; `python3 tests/test_arena.py` and `python3 tools/validate_adl.py`
-   must both be green before any PR.
-4. **Loops end with a retrospective** comment on the issue (Loop Protocol:
-   what changed the plan, weakest assumption, next loop).
+1. **`planning/graph.yaml` is the canonical execution graph** — the source of
+   truth for scheduling and status. `tools/graph_lint.py` enforces invariants
+   G1–G7 and prints the READY frontier. Rules of engagement live in
+   `planning/prompts/` (bootstrap / node-executor / supervisor / retrospective).
+   `plan/backlog.yaml` is the superseded fuller design, retained because the
+   generated `spdd/prompt/` artifacts still bind each node's context.
+2. **Every executable node anchors on one GitHub issue** and keeps its binding
+   REASONS-LITE artifact in `spdd/prompt/` (`spdd/INDEX.md` maps node ↔ issue
+   number). Read the artifact in full before implementing; **update its Sync
+   Log in the same PR** if your implementation materially diverges.
+3. **Claim → branch → PR is the isolation and evidence boundary.** A claimed
+   node gets one branch `node/<ID>-<slug>` (worktree if parallel), one primary
+   PR linking its issue with test evidence, and a rebase + re-verify gate
+   before merge. Issue closure never establishes doneness; a node flips to
+   `done` in a planning commit that records evidence.
+4. **Doneness is a passing test**, never a closed ticket. Every node names its
+   tests; `python3 tests/test_arena.py`, `python3 tools/validate_adl.py`, and
+   `python3 tools/graph_lint.py` must all be green before any PR.
+5. **Nodes end with a retrospective** comment on the issue (what changed the
+   plan, weakest assumption, next node), per `planning/prompts/30-retrospective.md`.
+6. **Decision nodes (`DEC-*`, `humanGate: true`) gate the parked lanes.**
+   Consequential ambiguity becomes graph topology with an ADR in `docs/adr/`,
+   not a question buried in a prompt. Discovered scope becomes a new node and
+   edge — never silent expansion of the current node.
 
 ## Repository shape
 
@@ -51,8 +64,9 @@ pip install pyyaml jsonschema solders --break-system-packages
 python3 tests/test_arena.py            # 55 checks — must pass before any PR
 python3 tools/validate_adl.py          # schema gate against pinned v0.2
 python3 tools/simulate.py --seeds 200  # balance sweep; regen BALANCE-REPORT if engine changed
-python3 tools/plan_lint.py             # plan invariants L1-L7
-python3 tools/generate_prompts.py      # regenerate spdd/ + github/ from the graph
+python3 tools/graph_lint.py            # graph invariants G1-G7 + READY frontier
+python3 tools/plan_lint.py             # legacy plan invariants L1-L7 (backlog.yaml)
+python3 tools/generate_prompts.py      # regenerate spdd/ + github/ from backlog.yaml
 python3 web/server.py 8000             # / = landing, /play = arena app
 python3 cli/arena.py --help
 ```

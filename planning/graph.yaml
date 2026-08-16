@@ -1,0 +1,1565 @@
+# Reddi Arena — canonical execution graph (graph-v1)
+# Migrated from plan/backlog.yaml by tools/plan_to_graph.py (node GE01).
+# This file is now the source of truth for scheduling and status.
+# plan/backlog.yaml is retained as the superseded fuller design and still
+# backs the generated spdd/ prompt artifacts (binding per-node context).
+# Lint: python3 tools/graph_lint.py   Rules: planning/prompts/00-bootstrap.md
+# Do not record volatile GitHub state (PR numbers, worktrees, CI) here.
+version: graph-v1
+project: reddi-arena
+defaultBranch: main
+policies:
+  oneIssuePerExecutableNode: true
+  oneWorktreePerClaimedNode: true
+  onePrimaryPRPerNode: true
+  requireLinearHistory: true
+  preferredMerge: rebase
+  requireRetrospective: true
+  doneRequiresEvidence: true
+  maxParallelNodes: 2
+nodeTypes:
+- discovery
+- decision
+- design
+- implementation
+- verification
+- documentation
+- release
+statuses:
+- ready
+- blocked
+- parked
+- cancelled
+- done
+nodes:
+- id: A1
+  type: implementation
+  title: Validate reference ADL documents against the published v0.2 schema
+  status: done
+  objective: The reference bots were drafted from prose, not from the schema. Until validated
+    they are hypotheses, not artifacts.
+  epic: E01
+  lane: SL-A
+  phase: P0
+  parent: null
+  dependsOn: []
+  acceptance:
+  - Both reference ADL documents validate with zero schema errors
+  - The pinned schema hash is recorded and checked in CI
+  - Every drift correction has a one-line changelog entry citing the schema path
+  tests:
+  - id: T-001
+    command: python3 tools/validate_adl.py && python3 tests/test_arena.py
+  - id: T-002
+    command: python3 tools/validate_adl.py && python3 tests/test_arena.py
+  evidence:
+    required:
+    - test-output
+    - pr-review
+    - spdd artifact (spdd/prompt/*-a1-*.md) Sync Log updated
+    recorded:
+    - tools/validate_adl.py — both reference documents 0 errors against pinned schema 679a5c3e...;
+      15 drift corrections and 5 findings logged in docs/FINDINGS.md; F-001 charge-intent
+      gap reproduced as a schema-valid negative fixture.
+  boundary: Validation proves document shape only. It authorizes no execution.
+  surfaces:
+    allow: &id001
+    - adl/
+    - fixtures/
+    - vendor/
+    - tools/
+    - docs/
+    - tests/
+    deny:
+    - artifacts/
+  humanGate: false
+- id: A2
+  type: implementation
+  title: Build the Arena negative-fixture corpus
+  status: ready
+  objective: Invalid documents must fail for the stated reason, not incidentally.
+  epic: E01
+  lane: SL-A
+  phase: P0
+  parent: null
+  dependsOn:
+  - A1
+  acceptance:
+  - Every negative fixture fails validation
+  - Every negative fixture asserts a specific diagnostic, not a generic failure
+  - Zero negative fixtures pass silently
+  tests:
+  - id: T-003
+    command: 'python3 tests/test_arena.py  # implement T-003 per docs/TEST-PLAN.md; keep suite
+      green'
+  - id: T-004
+    command: 'python3 tests/test_arena.py  # implement T-004 per docs/TEST-PLAN.md; keep suite
+      green'
+  evidence:
+    required:
+    - test-output
+    - pr-review
+    - spdd artifact (spdd/prompt/*-a2-*.md) Sync Log updated
+  boundary: Fixtures are review artifacts; they do not define new ADL semantics.
+  surfaces:
+    allow: *id001
+    deny:
+    - artifacts/
+  humanGate: false
+- id: A3
+  type: implementation
+  title: Define the arena-profile extension namespace
+  status: ready
+  objective: Arena needs match-specific metadata (format, class, fuel cap) without polluting
+    canonical ADL.
+  epic: E01
+  lane: SL-A
+  phase: P0
+  parent: null
+  dependsOn:
+  - A1
+  acceptance:
+  - x-arena fields validate under strict mode
+  - An unprefixed "arena:" key fails strict validation
+  - No payment, spend, or authority semantics exist in x-arena
+  tests:
+  - id: T-005
+    command: 'python3 tests/test_arena.py  # implement T-005 per docs/TEST-PLAN.md; keep suite
+      green'
+  - id: T-006
+    command: 'python3 tests/test_arena.py  # implement T-006 per docs/TEST-PLAN.md; keep suite
+      green'
+  evidence:
+    required:
+    - test-output
+    - pr-review
+    - spdd artifact (spdd/prompt/*-a3-*.md) Sync Log updated
+  boundary: An x- namespace is Arena-local. It confers no canonical status and must not carry
+    payment-like semantics.
+  surfaces:
+    allow: *id001
+    deny:
+    - artifacts/
+  humanGate: false
+- id: A4
+  type: implementation
+  title: Specify and freeze the AU weight formula v0.1
+  status: ready
+  objective: If weight is not deterministic and independently recomputable, the whole competitive
+    frame collapses.
+  epic: E02
+  lane: SL-A
+  phase: P0
+  parent: null
+  dependsOn:
+  - A1
+  acceptance:
+  - Same document yields identical AU and hash across runs, machines, and key order
+  - Certificate records weightsVersion so old results stay interpretable
+  - Reordering YAML keys does not change the hash
+  tests:
+  - id: T-007
+    command: 'python3 tests/test_arena.py  # implement T-007 per docs/TEST-PLAN.md; keep suite
+      green'
+  - id: T-008
+    command: 'python3 tests/test_arena.py  # implement T-008 per docs/TEST-PLAN.md; keep suite
+      green'
+  - id: T-009
+    command: 'python3 tests/test_arena.py  # implement T-009 per docs/TEST-PLAN.md; keep suite
+      green'
+  evidence:
+    required:
+    - test-output
+    - pr-review
+    - spdd artifact (spdd/prompt/*-a4-*.md) Sync Log updated
+  boundary: A weight certificate authorizes nothing; it is an eligibility input only.
+  surfaces:
+    allow: *id001
+    deny:
+    - artifacts/
+  humanGate: false
+- id: A5
+  type: implementation
+  title: Implement coupled weight for hired specialists
+  status: blocked
+  objective: The class-bump-on-hire tradeoff is the core strategic mechanic and must be computed
+    identically by every implementation.
+  epic: E02
+  lane: SL-A
+  phase: P0
+  parent: null
+  dependsOn:
+  - A4
+  acceptance:
+  - Hiring a specialist increases fielded AU and can change fielded class
+  - A hire that would exceed the entered class is rejected at draft, not mid-match
+  - Transitive hire depth beyond the cap is refused with a stated reason
+  tests:
+  - id: T-010
+    command: 'python3 tests/test_arena.py  # implement T-010 per docs/TEST-PLAN.md; keep suite
+      green'
+  - id: T-011
+    command: 'python3 tests/test_arena.py  # implement T-011 per docs/TEST-PLAN.md; keep suite
+      green'
+  - id: T-012
+    command: 'python3 tests/test_arena.py  # implement T-012 per docs/TEST-PLAN.md; keep suite
+      green'
+  evidence:
+    required:
+    - test-output
+    - pr-review
+    - spdd artifact (spdd/prompt/*-a5-*.md) Sync Log updated
+  boundary: Computing coupled weight does not engage a specialist or move value.
+  surfaces:
+    allow: *id001
+    deny:
+    - artifacts/
+  humanGate: false
+- id: A6
+  type: verification
+  title: Anti-gaming review of the weight formula
+  status: blocked
+  objective: Any scoring function invites optimisation against its own artifacts.
+  epic: E02
+  lane: SL-A
+  phase: P0
+  parent: null
+  dependsOn:
+  - A4
+  acceptance:
+  - No-op policy padding cannot reduce AU below the declared floor
+  - Understated declarations are detectable at runtime by E13 binding
+  - Exploit report exists and is linked from the formula spec
+  tests:
+  - id: T-013
+    command: 'python3 tests/test_arena.py  # implement T-013 per docs/TEST-PLAN.md; keep suite
+      green'
+  - id: T-014
+    command: 'python3 tests/test_arena.py  # implement T-014 per docs/TEST-PLAN.md; keep suite
+      green'
+  evidence:
+    required:
+    - test-output
+    - pr-review
+    - spdd artifact (spdd/prompt/*-a6-*.md) Sync Log updated
+  boundary: Review output is advisory to formula v0.2; it does not change v0.1 mid-season.
+  surfaces:
+    allow: *id001
+    deny:
+    - artifacts/
+  humanGate: false
+- id: A7
+  type: implementation
+  title: Map conformance levels to league tiers
+  status: blocked
+  objective: This is the teaching mechanism — players learn the spec by ranking up, not by
+    reading it.
+  epic: E03
+  lane: SL-A
+  phase: P1
+  parent: null
+  dependsOn:
+  - A1
+  - A4
+  acceptance:
+  - A Level-1 document cannot enter a Title fight or carry a purse
+  - requestedLevel above achieved level is rejected with the failing requirement named
+  - The tier verdict is recorded in the weigh-in certificate
+  tests:
+  - id: T-015
+    command: 'python3 tests/test_arena.py  # implement T-015 per docs/TEST-PLAN.md; keep suite
+      green'
+  - id: T-016
+    command: 'python3 tests/test_arena.py  # implement T-016 per docs/TEST-PLAN.md; keep suite
+      green'
+  evidence:
+    required:
+    - test-output
+    - pr-review
+    - spdd artifact (spdd/prompt/*-a7-*.md) Sync Log updated
+  boundary: Reaching a tier grants match eligibility only. It never grants provider, network,
+    wallet, or rail access.
+  surfaces:
+    allow: *id001
+    deny:
+    - artifacts/
+  humanGate: false
+- id: A8
+  type: implementation
+  title: Guard the known v0.2 charge-intent conformance gap
+  status: blocked
+  objective: The lab records that charge intents can escape intended Level-3 enforcement.
+    Arena must not inherit that hole.
+  epic: E03
+  lane: SL-A
+  phase: P1
+  parent: null
+  dependsOn:
+  - A7
+  acceptance:
+  - An under-constrained charge intent is refused at draft with a stated reason
+  - The guard is documented as compensating, not as a spec fix
+  - An upstream issue exists with a minimal reproduction
+  tests:
+  - id: T-017
+    command: 'python3 tests/test_arena.py  # implement T-017 per docs/TEST-PLAN.md; keep suite
+      green'
+  - id: T-018
+    command: 'python3 tests/test_arena.py  # implement T-018 per docs/TEST-PLAN.md; keep suite
+      green'
+  evidence:
+    required:
+    - test-output
+    - pr-review
+    - spdd artifact (spdd/prompt/*-a8-*.md) Sync Log updated
+  boundary: The guard is Arena-local compensating control. It does not fix the spec and must
+    not be described as fixing it.
+  surfaces:
+    allow: *id001
+    deny:
+    - artifacts/
+  humanGate: false
+- id: B1
+  type: implementation
+  title: Build the bounded execution lane
+  status: ready
+  objective: Execution is the one place the declaration becomes action, so it is the one place
+    fail-closed must be provably enforced.
+  epic: E04
+  lane: SL-B
+  phase: P1
+  parent: null
+  dependsOn:
+  - A1
+  acceptance:
+  - A tool absent from the ADL cannot be invoked
+  - A tool present but lacking a matching policyRef cannot be invoked
+  - Network egress with an empty allowlist is refused and logged
+  - Every refusal emits an event with subject, resource, action, and reason
+  tests:
+  - id: T-019
+    command: 'python3 tests/test_arena.py  # implement T-019 per docs/TEST-PLAN.md; keep suite
+      green'
+  - id: T-020
+    command: 'python3 tests/test_arena.py  # implement T-020 per docs/TEST-PLAN.md; keep suite
+      green'
+  - id: T-021
+    command: 'python3 tests/test_arena.py  # implement T-021 per docs/TEST-PLAN.md; keep suite
+      green'
+  - id: T-022
+    command: 'python3 tests/test_arena.py  # implement T-022 per docs/TEST-PLAN.md; keep suite
+      green'
+  evidence:
+    required:
+    - test-output
+    - pr-review
+    - spdd artifact (spdd/prompt/*-b1-*.md) Sync Log updated
+  boundary: The lane is the ONLY component permitted to execute, and only for declared, policy-matched,
+    locally-bound capabilities.
+  surfaces:
+    allow: &id002
+    - core/
+    - tests/
+    deny:
+    - artifacts/
+  humanGate: false
+- id: B2
+  type: implementation
+  title: Implement the turn loop and match lifecycle
+  status: blocked
+  objective: Deterministic lifecycle is the precondition for replayable evidence.
+  epic: E04
+  lane: SL-B
+  phase: P1
+  parent: null
+  dependsOn:
+  - B1
+  acceptance:
+  - Every match terminates in a defined terminal state
+  - A crashed or hung competitor forfeits rather than hanging the match
+  - Illegal state transitions are impossible, not merely discouraged
+  tests:
+  - id: T-023
+    command: 'python3 tests/test_arena.py  # implement T-023 per docs/TEST-PLAN.md; keep suite
+      green'
+  - id: T-024
+    command: 'python3 tests/test_arena.py  # implement T-024 per docs/TEST-PLAN.md; keep suite
+      green'
+  - id: T-025
+    command: 'python3 tests/test_arena.py  # implement T-025 per docs/TEST-PLAN.md; keep suite
+      green'
+  evidence:
+    required:
+    - test-output
+    - pr-review
+    - spdd artifact (spdd/prompt/*-b2-*.md) Sync Log updated
+  boundary: Lifecycle events are evidence, not adjudication.
+  surfaces:
+    allow: *id002
+    deny:
+    - artifacts/
+  humanGate: false
+- id: B3
+  type: implementation
+  title: Provider abstraction across declared model providers
+  status: blocked
+  objective: Provider neutrality is an ADL promise; the Arena is where it either holds or
+    visibly breaks.
+  epic: E04
+  lane: SL-B
+  phase: P1
+  parent: null
+  dependsOn:
+  - B1
+  acceptance:
+  - Undeclared fallbacks are never used
+  - A provider missing structuredOutput reports degraded, not silent success
+  - Cross-provider divergence is measured and published, not hidden
+  tests:
+  - id: T-026
+    command: 'python3 tests/test_arena.py  # implement T-026 per docs/TEST-PLAN.md; keep suite
+      green'
+  - id: T-027
+    command: 'python3 tests/test_arena.py  # implement T-027 per docs/TEST-PLAN.md; keep suite
+      green'
+  - id: T-028
+    command: 'python3 tests/test_arena.py  # implement T-028 per docs/TEST-PLAN.md; keep suite
+      green'
+  evidence:
+    required:
+    - test-output
+    - pr-review
+    - spdd artifact (spdd/prompt/*-b3-*.md) Sync Log updated
+  boundary: Declaring a provider is not credential authorization. Missing credentials fail
+    closed rather than silently falling back.
+  surfaces:
+    allow: *id002
+    deny:
+    - artifacts/
+  humanGate: false
+- id: B4
+  type: implementation
+  title: Implement token fuel accounting
+  status: blocked
+  objective: Efficiency becomes a skill only if fuel is metered and enforced.
+  epic: E05
+  lane: SL-B
+  phase: P1
+  parent: null
+  dependsOn:
+  - B2
+  acceptance:
+  - Exceeding the declared fuel cap fails the budget gate
+  - Fuel exhaustion produces a defined outcome, never an exception
+  - Accounting reconciles exactly with the emitted trace
+  tests:
+  - id: T-029
+    command: 'python3 tests/test_arena.py  # implement T-029 per docs/TEST-PLAN.md; keep suite
+      green'
+  - id: T-030
+    command: 'python3 tests/test_arena.py  # implement T-030 per docs/TEST-PLAN.md; keep suite
+      green'
+  - id: T-031
+    command: 'python3 tests/test_arena.py  # implement T-031 per docs/TEST-PLAN.md; keep suite
+      green'
+  evidence:
+    required:
+    - test-output
+    - pr-review
+    - spdd artifact (spdd/prompt/*-b4-*.md) Sync Log updated
+  boundary: Fuel accounting is deterministic bookkeeping, not billing.
+  surfaces:
+    allow: *id002
+    deny:
+    - artifacts/
+  humanGate: false
+- id: B5
+  type: implementation
+  title: Emit conformance-aligned trace events with redaction
+  status: blocked
+  objective: The trace is the evidence substrate for receipts, learning mode, and disputes.
+  epic: E05
+  lane: SL-B
+  phase: P1
+  parent: null
+  dependsOn:
+  - B2
+  acceptance:
+  - Every match emits a complete, ordered, replayable event stream
+  - Redaction rules from the ADL are applied, not defaults
+  - No credential or canary value appears anywhere in a stored trace
+  tests:
+  - id: T-032
+    command: 'python3 tests/test_arena.py  # implement T-032 per docs/TEST-PLAN.md; keep suite
+      green'
+  - id: T-033
+    command: 'python3 tests/test_arena.py  # implement T-033 per docs/TEST-PLAN.md; keep suite
+      green'
+  - id: T-034
+    command: 'python3 tests/test_arena.py  # implement T-034 per docs/TEST-PLAN.md; keep suite
+      green'
+  evidence:
+    required:
+    - test-output
+    - pr-review
+    - spdd artifact (spdd/prompt/*-b5-*.md) Sync Log updated
+  boundary: A trace records what happened. It does not by itself establish task success or
+    reputation eligibility.
+  surfaces:
+    allow: *id002
+    deny:
+    - artifacts/
+  humanGate: false
+- id: B6
+  type: implementation
+  title: Implement Vault attack/defend scoring
+  status: blocked
+  objective: A format nobody can argue about is worth more than five ambiguous ones.
+  epic: E06
+  lane: SL-B
+  phase: P1
+  parent: null
+  dependsOn:
+  - B2
+  - B4
+  acceptance:
+  - Identical traces always produce identical scores
+  - Every terminal state has exactly one defined scoring outcome
+  - A secret leaked in any form the canary detects scores as extraction
+  tests:
+  - id: T-035
+    command: 'python3 tests/test_arena.py  # implement T-035 per docs/TEST-PLAN.md; keep suite
+      green'
+  - id: T-036
+    command: 'python3 tests/test_arena.py  # implement T-036 per docs/TEST-PLAN.md; keep suite
+      green'
+  - id: T-037
+    command: 'python3 tests/test_arena.py  # implement T-037 per docs/TEST-PLAN.md; keep suite
+      green'
+  evidence:
+    required:
+    - test-output
+    - pr-review
+    - spdd artifact (spdd/prompt/*-b6-*.md) Sync Log updated
+  boundary: Scoring is deterministic given a trace; it does not judge intent.
+  surfaces:
+    allow: *id002
+    deny:
+    - artifacts/
+  humanGate: false
+- id: B7
+  type: implementation
+  title: Format balance harness
+  status: blocked
+  objective: Without a balance harness, the first dominant strategy ends the format's competitive
+    life.
+  epic: E06
+  lane: SL-B
+  phase: P1
+  parent: null
+  dependsOn:
+  - B6
+  acceptance:
+  - Attacker/defender win split falls within the published tolerance band
+  - No single archetype exceeds the published dominance threshold
+  - The balance report is published before the season opens
+  tests:
+  - id: T-038
+    command: 'python3 tests/test_arena.py  # implement T-038 per docs/TEST-PLAN.md; keep suite
+      green'
+  - id: T-039
+    command: 'python3 tests/test_arena.py  # implement T-039 per docs/TEST-PLAN.md; keep suite
+      green'
+  evidence:
+    required:
+    - test-output
+    - pr-review
+    - spdd artifact (spdd/prompt/*-b7-*.md) Sync Log updated
+  boundary: Balance findings inform format v0.2; they do not retroactively alter results.
+  surfaces:
+    allow: *id002
+    deny:
+    - artifacts/
+  humanGate: false
+- id: C1
+  type: implementation
+  title: Integrate discovery-source into the specialist listing surface
+  status: parked
+  objective: Discovery is where players first meet RAP's "relevance is not trust" rule.
+  epic: E07
+  lane: SL-C
+  phase: P2
+  parent: null
+  dependsOn:
+  - A1
+  - A4
+  - DEC-C-UNPARK
+  acceptance:
+  - A listing cannot claim a capability absent from its ADL
+  - Provenance is displayed for every listing
+  - Discovery never triggers invocation or publication as a side effect
+  tests:
+  - id: T-040
+    command: 'python3 tests/test_arena.py  # implement T-040 per docs/TEST-PLAN.md; keep suite
+      green'
+  - id: T-041
+    command: 'python3 tests/test_arena.py  # implement T-041 per docs/TEST-PLAN.md; keep suite
+      green'
+  - id: T-042
+    command: 'python3 tests/test_arena.py  # implement T-042 per docs/TEST-PLAN.md; keep suite
+      green'
+  evidence:
+    required:
+    - test-output
+    - pr-review
+    - spdd artifact (spdd/prompt/*-c1-*.md) Sync Log updated
+  boundary: A listing is a claim, not verified truth. Discovery grants no invocation permission
+    and no publication.
+  surfaces:
+    allow: &id003
+    - core/
+    - web/
+    - tests/
+    deny:
+    - artifacts/
+  humanGate: false
+- id: C2
+  type: implementation
+  title: Separate publication from discovery as an explicit gate
+  status: parked
+  objective: The spec is emphatic that publication must never happen accidentally.
+  epic: E07
+  lane: SL-C
+  phase: P2
+  parent: null
+  dependsOn:
+  - C1
+  acceptance:
+  - No code path publishes without explicit approval
+  - Publication events record the approver
+  - Export of a listing does not publish it
+  tests:
+  - id: T-043
+    command: 'python3 tests/test_arena.py  # implement T-043 per docs/TEST-PLAN.md; keep suite
+      green'
+  - id: T-044
+    command: 'python3 tests/test_arena.py  # implement T-044 per docs/TEST-PLAN.md; keep suite
+      green'
+  evidence:
+    required:
+    - test-output
+    - pr-review
+    - spdd artifact (spdd/prompt/*-c2-*.md) Sync Log updated
+  boundary: Import, mapping, and export must never publish a live listing.
+  surfaces:
+    allow: *id003
+    deny:
+    - artifacts/
+  humanGate: false
+- id: C3
+  type: implementation
+  title: Integrate buyer-authority-policy as the hire decision engine
+  status: parked
+  objective: Decide is the layer players most often skip conceptually, so the game must make
+    it unavoidable and visible.
+  epic: E08
+  lane: SL-C
+  phase: P2
+  parent: null
+  dependsOn:
+  - C1
+  - A5
+  acceptance:
+  - Every hire attempt yields a recorded decision with reason codes
+  - A mandate attempting to widen local authority is rejected
+  - Exceeding the declared purse budget denies the hire
+  tests:
+  - id: T-045
+    command: 'python3 tests/test_arena.py  # implement T-045 per docs/TEST-PLAN.md; keep suite
+      green'
+  - id: T-046
+    command: 'python3 tests/test_arena.py  # implement T-046 per docs/TEST-PLAN.md; keep suite
+      green'
+  - id: T-047
+    command: 'python3 tests/test_arena.py  # implement T-047 per docs/TEST-PLAN.md; keep suite
+      green'
+  evidence:
+    required:
+    - test-output
+    - pr-review
+    - spdd artifact (spdd/prompt/*-c3-*.md) Sync Log updated
+  boundary: An allow decision permits a bounded engagement only. It never widens buyer authority
+    beyond the operator-declared envelope.
+  surfaces:
+    allow: *id003
+    deny:
+    - artifacts/
+  humanGate: false
+- id: C4
+  type: implementation
+  title: Implement the draft window and weigh-in recomputation
+  status: parked
+  objective: The hire-versus-class tradeoff is the strategic heart of the game and must resolve
+    deterministically before combat.
+  epic: E08
+  lane: SL-C
+  phase: P2
+  parent: null
+  dependsOn:
+  - C3
+  - A5
+  acceptance:
+  - Fielded weight is recomputed and shown before the hire is committed
+  - A class-breaching hire is refused before the match, never mid-match
+  - The draft window closes deterministically and cannot be reopened
+  tests:
+  - id: T-048
+    command: 'python3 tests/test_arena.py  # implement T-048 per docs/TEST-PLAN.md; keep suite
+      green'
+  - id: T-049
+    command: 'python3 tests/test_arena.py  # implement T-049 per docs/TEST-PLAN.md; keep suite
+      green'
+  - id: T-050
+    command: 'python3 tests/test_arena.py  # implement T-050 per docs/TEST-PLAN.md; keep suite
+      green'
+  evidence:
+    required:
+    - test-output
+    - pr-review
+    - spdd artifact (spdd/prompt/*-c4-*.md) Sync Log updated
+  boundary: Draft outcomes bind eligibility only; no work or payment occurs at draft.
+  surfaces:
+    allow: *id003
+    deny:
+    - artifacts/
+  humanGate: false
+- id: C5
+  type: implementation
+  title: Implement dry-run escrow for purse and fees
+  status: parked
+  objective: 'The purse teaches the single most important RAP lesson: payment success is not
+    work success.'
+  epic: E09
+  lane: SL-C
+  phase: P2
+  parent: null
+  dependsOn:
+  - C3
+  acceptance:
+  - Transport success alone never releases escrow
+  - A failed required gate routes to refund or dispute, never payout
+  - Selecting any non-dry-run rail is refused
+  - Escrow accounting balances to zero across every terminal state
+  tests:
+  - id: T-051
+    command: 'python3 tests/test_arena.py  # implement T-051 per docs/TEST-PLAN.md; keep suite
+      green'
+  - id: T-052
+    command: 'python3 tests/test_arena.py  # implement T-052 per docs/TEST-PLAN.md; keep suite
+      green'
+  - id: T-053
+    command: 'python3 tests/test_arena.py  # implement T-053 per docs/TEST-PLAN.md; keep suite
+      green'
+  - id: T-054
+    command: 'python3 tests/test_arena.py  # implement T-054 per docs/TEST-PLAN.md; keep suite
+      green'
+  evidence:
+    required:
+    - test-output
+    - pr-review
+    - spdd artifact (spdd/prompt/*-c5-*.md) Sync Log updated
+  boundary: Rail is pinned to x402-dry-run. livePaymentAccess is false. No wallet, facilitator,
+    custody, or real value exists anywhere in this issue.
+  surfaces:
+    allow: *id003
+    deny:
+    - artifacts/
+  humanGate: false
+- id: C6
+  type: implementation
+  title: Integrate receipts and receipt-evidence-binding per match and engagement
+  status: parked
+  objective: The receipt is the artifact an external analyst can actually check.
+  epic: E09
+  lane: SL-C
+  phase: P2
+  parent: null
+  dependsOn:
+  - C5
+  - B5
+  acceptance:
+  - Every completed match and engagement emits a schema-valid receipt
+  - A receipt with a missing paymentProofRef fails validation
+  - No receipt ever contains credential material
+  - evidenceRef resolves to a retrievable trace
+  tests:
+  - id: T-055
+    command: 'python3 tests/test_arena.py  # implement T-055 per docs/TEST-PLAN.md; keep suite
+      green'
+  - id: T-056
+    command: 'python3 tests/test_arena.py  # implement T-056 per docs/TEST-PLAN.md; keep suite
+      green'
+  - id: T-057
+    command: 'python3 tests/test_arena.py  # implement T-057 per docs/TEST-PLAN.md; keep suite
+      green'
+  - id: T-058
+    command: 'python3 tests/test_arena.py  # implement T-058 per docs/TEST-PLAN.md; keep suite
+      green'
+  evidence:
+    required:
+    - test-output
+    - pr-review
+    - spdd artifact (spdd/prompt/*-c6-*.md) Sync Log updated
+  boundary: A receipt records that policy, payment reference, and evidence reference existed.
+    It does not prove settlement finality or provider quality.
+  surfaces:
+    allow: *id003
+    deny:
+    - artifacts/
+  humanGate: false
+- id: C7
+  type: implementation
+  title: Integrate attestation-reputation as the judge actor
+  status: parked
+  objective: RAP already names a paid judge actor; the arena referee is that actor.
+  epic: E09
+  lane: SL-C
+  phase: P2
+  parent: null
+  dependsOn:
+  - C6
+  acceptance:
+  - Attestation state is present on every receipt
+  - A failed attestation blocks payout even when transport succeeded
+  - Judge unavailability produces a defined outcome, not an indefinite hang
+  tests:
+  - id: T-059
+    command: 'python3 tests/test_arena.py  # implement T-059 per docs/TEST-PLAN.md; keep suite
+      green'
+  - id: T-060
+    command: 'python3 tests/test_arena.py  # implement T-060 per docs/TEST-PLAN.md; keep suite
+      green'
+  - id: T-061
+    command: 'python3 tests/test_arena.py  # implement T-061 per docs/TEST-PLAN.md; keep suite
+      green'
+  evidence:
+    required:
+    - test-output
+    - pr-review
+    - spdd artifact (spdd/prompt/*-c7-*.md) Sync Log updated
+  boundary: An attestation is one evidence input. It cannot substitute for required eval gates
+    or for payment proof.
+  surfaces:
+    allow: *id003
+    deny:
+    - artifacts/
+  humanGate: false
+- id: C8
+  type: implementation
+  title: Integrate offchain-reputation-preview and enforce eligibility rules
+  status: parked
+  objective: The spec is explicit that reputation must not mutate when policy failed or evidence
+    is missing. This is the cleanest thing an analyst can audit.
+  epic: E10
+  lane: SL-C
+  phase: P3
+  parent: null
+  dependsOn:
+  - C6
+  - C7
+  acceptance:
+  - A match failing policy produces zero reputation change
+  - A match with a missing evidence ref produces zero reputation change
+  - Every rating change is traceable to a specific eligible receipt
+  tests:
+  - id: T-062
+    command: 'python3 tests/test_arena.py  # implement T-062 per docs/TEST-PLAN.md; keep suite
+      green'
+  - id: T-063
+    command: 'python3 tests/test_arena.py  # implement T-063 per docs/TEST-PLAN.md; keep suite
+      green'
+  - id: T-064
+    command: 'python3 tests/test_arena.py  # implement T-064 per docs/TEST-PLAN.md; keep suite
+      green'
+  evidence:
+    required:
+    - test-output
+    - pr-review
+    - spdd artifact (spdd/prompt/*-c8-*.md) Sync Log updated
+  boundary: Reputation is a derived signal within one season. It is not portable identity
+    and carries no external warranty.
+  surfaces:
+    allow: *id003
+    deny:
+    - artifacts/
+  humanGate: false
+- id: C9
+  type: implementation
+  title: Implement commit-reveal scoring
+  status: parked
+  objective: Rivals scoring rivals invites retaliation and copying; commit-reveal is the spec's
+    answer and the arena is a natural stress test.
+  epic: E10
+  lane: SL-C
+  phase: P3
+  parent: null
+  dependsOn:
+  - C8
+  acceptance:
+  - No score is visible before the reveal window opens
+  - A non-revealed commit is penalised per published rule
+  - A reveal not matching its commit hash is rejected
+  tests:
+  - id: T-065
+    command: 'python3 tests/test_arena.py  # implement T-065 per docs/TEST-PLAN.md; keep suite
+      green'
+  - id: T-066
+    command: 'python3 tests/test_arena.py  # implement T-066 per docs/TEST-PLAN.md; keep suite
+      green'
+  - id: T-067
+    command: 'python3 tests/test_arena.py  # implement T-067 per docs/TEST-PLAN.md; keep suite
+      green'
+  evidence:
+    required:
+    - test-output
+    - pr-review
+    - spdd artifact (spdd/prompt/*-c9-*.md) Sync Log updated
+  boundary: Off-chain commit-reveal only in P3. On-chain projection is E15.
+  surfaces:
+    allow: *id003
+    deny:
+    - artifacts/
+  humanGate: false
+- id: D1
+  type: implementation
+  title: Build the visual garage that emits ADL
+  status: parked
+  objective: The garage is the on-ramp; if it emits anything other than canonical ADL, the
+    whole proof is undermined.
+  epic: E11
+  lane: SL-D
+  phase: P2
+  parent: null
+  dependsOn:
+  - A1
+  - A4
+  - DEC-D-UNPARK
+  acceptance:
+  - Every reachable garage state emits a schema-valid document
+  - Weight updates live and matches the CLI calculator exactly
+  - Errors name the offending field and link to the governing spec section
+  tests:
+  - id: T-068
+    command: 'python3 tests/test_arena.py  # implement T-068 per docs/TEST-PLAN.md; keep suite
+      green'
+  - id: T-069
+    command: 'python3 tests/test_arena.py  # implement T-069 per docs/TEST-PLAN.md; keep suite
+      green'
+  - id: T-070
+    command: 'python3 tests/test_arena.py  # implement T-070 per docs/TEST-PLAN.md; keep suite
+      green'
+  evidence:
+    required:
+    - test-output
+    - pr-review
+    - spdd artifact (spdd/prompt/*-d1-*.md) Sync Log updated
+  boundary: The garage authors documents. It never executes or publishes them.
+  surfaces:
+    allow: &id004
+    - web/
+    - tests/
+    deny:
+    - artifacts/
+  humanGate: false
+- id: D2
+  type: implementation
+  title: Round-trip fidelity between visual and raw editing
+  status: parked
+  objective: Experts will not adopt a tool that mangles their handwritten documents.
+  epic: E11
+  lane: SL-D
+  phase: P2
+  parent: null
+  dependsOn:
+  - D1
+  acceptance:
+  - Import then export is semantically lossless
+  - Any UI-unsupported field is reported, never silently dropped
+  - Comments and ordering loss is disclosed to the player
+  tests:
+  - id: T-071
+    command: 'python3 tests/test_arena.py  # implement T-071 per docs/TEST-PLAN.md; keep suite
+      green'
+  - id: T-072
+    command: 'python3 tests/test_arena.py  # implement T-072 per docs/TEST-PLAN.md; keep suite
+      green'
+  evidence:
+    required:
+    - test-output
+    - pr-review
+    - spdd artifact (spdd/prompt/*-d2-*.md) Sync Log updated
+  boundary: Round-tripping preserves semantics; it does not validate intent.
+  surfaces:
+    allow: *id004
+    deny:
+    - artifacts/
+  humanGate: false
+- id: D3
+  type: implementation
+  title: Render the annotated match replay
+  status: parked
+  objective: The replay is where a receipt and a trace become a learning experience instead
+    of a compliance artifact.
+  epic: E12
+  lane: SL-D
+  phase: P3
+  parent: null
+  dependsOn:
+  - B5
+  - B6
+  - DEC-D-UNPARK
+  acceptance:
+  - Every rendered claim maps to a specific trace event
+  - No replay statement is unsupported by evidence
+  - Disclosure rules are enforced per season configuration
+  tests:
+  - id: T-073
+    command: 'python3 tests/test_arena.py  # implement T-073 per docs/TEST-PLAN.md; keep suite
+      green'
+  - id: T-074
+    command: 'python3 tests/test_arena.py  # implement T-074 per docs/TEST-PLAN.md; keep suite
+      green'
+  evidence:
+    required:
+    - test-output
+    - pr-review
+    - spdd artifact (spdd/prompt/*-d3-*.md) Sync Log updated
+  boundary: The replay renders recorded evidence. It never reconstructs, infers, or embellishes
+    what was not traced.
+  surfaces:
+    allow: *id004
+    deny:
+    - artifacts/
+  humanGate: false
+- id: D4
+  type: implementation
+  title: Build the pit-crew coach
+  status: parked
+  objective: One concrete fix per loss is the difference between churn and mastery.
+  epic: E12
+  lane: SL-D
+  phase: P3
+  parent: null
+  dependsOn:
+  - D3
+  acceptance:
+  - Each loss yields at most one concrete, evidence-grounded suggestion
+  - Every suggestion cites a spec section or a trace event
+  - Insufficient evidence produces an honest "cannot determine" message
+  tests:
+  - id: T-075
+    command: 'python3 tests/test_arena.py  # implement T-075 per docs/TEST-PLAN.md; keep suite
+      green'
+  - id: T-076
+    command: 'python3 tests/test_arena.py  # implement T-076 per docs/TEST-PLAN.md; keep suite
+      green'
+  evidence:
+    required:
+    - test-output
+    - pr-review
+    - spdd artifact (spdd/prompt/*-d4-*.md) Sync Log updated
+  boundary: Coaching is advisory. It never edits a player's bot and never guarantees an outcome.
+  surfaces:
+    allow: *id004
+    deny:
+    - artifacts/
+  humanGate: false
+- id: E1I
+  type: implementation
+  title: Enforce runtime binding against the weighed declaration
+  status: blocked
+  objective: This single control is what makes weight class meaningful and makes ADL a contract
+    rather than documentation.
+  epic: E13
+  lane: SL-E
+  phase: P1
+  parent: null
+  dependsOn:
+  - B1
+  - A4
+  acceptance:
+  - A capability absent from the weighed hash cannot execute
+  - An escape attempt forfeits the match with recorded evidence
+  - The bound hash on the trace matches the weigh-in certificate exactly
+  tests:
+  - id: T-077
+    command: 'python3 tests/test_arena.py  # implement T-077 per docs/TEST-PLAN.md; keep suite
+      green'
+  - id: T-078
+    command: 'python3 tests/test_arena.py  # implement T-078 per docs/TEST-PLAN.md; keep suite
+      green'
+  - id: T-079
+    command: 'python3 tests/test_arena.py  # implement T-079 per docs/TEST-PLAN.md; keep suite
+      green'
+  evidence:
+    required:
+    - test-output
+    - pr-review
+    - spdd artifact (spdd/prompt/*-e1i-*.md) Sync Log updated
+  boundary: Binding enforces the declaration. It does not evaluate whether the declaration
+    was wise.
+  surfaces:
+    allow: &id005
+    - core/
+    - tests/
+    deny:
+    - artifacts/
+  humanGate: false
+- id: E2I
+  type: implementation
+  title: Detect undeclared-capability reliance
+  status: blocked
+  objective: The subtler cheat is not declaring a tool but relying on capacity beyond the
+    declared envelope.
+  epic: E13
+  lane: SL-E
+  phase: P1
+  parent: null
+  dependsOn:
+  - E1I
+  - B4
+  acceptance:
+  - Declared-versus-actual usage is measured on every match
+  - Sustained overrun is flagged with the measured delta
+  - No automatic ban occurs without human review
+  tests:
+  - id: T-080
+    command: 'python3 tests/test_arena.py  # implement T-080 per docs/TEST-PLAN.md; keep suite
+      green'
+  - id: T-081
+    command: 'python3 tests/test_arena.py  # implement T-081 per docs/TEST-PLAN.md; keep suite
+      green'
+  evidence:
+    required:
+    - test-output
+    - pr-review
+    - spdd artifact (spdd/prompt/*-e2i-*.md) Sync Log updated
+  boundary: Detection flags a discrepancy; adjudication is a separate human-reviewed step.
+  surfaces:
+    allow: *id005
+    deny:
+    - artifacts/
+  humanGate: false
+- id: E3I
+  type: implementation
+  title: Contain cross-competitor prompt injection
+  status: parked
+  objective: The Vault format deliberately makes injection a legitimate move, which makes
+    containment non-negotiable rather than optional.
+  epic: E14
+  lane: SL-E
+  phase: P2
+  parent: null
+  dependsOn:
+  - B1
+  - B6
+  - DEC-E-UNPARK
+  acceptance:
+  - Opponent content never reaches an approved-source path
+  - No opponent payload can alter judge or broker behaviour
+  - Hostile payload fuzzing produces zero platform-level escapes
+  tests:
+  - id: T-082
+    command: 'python3 tests/test_arena.py  # implement T-082 per docs/TEST-PLAN.md; keep suite
+      green'
+  - id: T-083
+    command: 'python3 tests/test_arena.py  # implement T-083 per docs/TEST-PLAN.md; keep suite
+      green'
+  - id: T-084
+    command: 'python3 tests/test_arena.py  # implement T-084 per docs/TEST-PLAN.md; keep suite
+      green'
+  evidence:
+    required:
+    - test-output
+    - pr-review
+    - spdd artifact (spdd/prompt/*-e3i-*.md) Sync Log updated
+  boundary: Containment protects the platform and third parties. It does not protect a competitor
+    from a fair in-match attack.
+  surfaces:
+    allow: *id005
+    deny:
+    - artifacts/
+  humanGate: false
+- id: E4I
+  type: implementation
+  title: Abuse, harm and content handling for player-authored bots
+  status: parked
+  objective: Player-authored agents are user-generated content and will eventually include
+    harmful material.
+  epic: E14
+  lane: SL-E
+  phase: P2
+  parent: null
+  dependsOn:
+  - E3I
+  acceptance:
+  - Prohibited-behaviour policy is published before the first season
+  - Every moderation action is logged with reviewer and reason
+  - An appeal path exists and is documented
+  tests:
+  - id: T-085
+    command: 'python3 tests/test_arena.py  # implement T-085 per docs/TEST-PLAN.md; keep suite
+      green'
+  - id: T-086
+    command: 'python3 tests/test_arena.py  # implement T-086 per docs/TEST-PLAN.md; keep suite
+      green'
+  evidence:
+    required:
+    - test-output
+    - pr-review
+    - spdd artifact (spdd/prompt/*-e4i-*.md) Sync Log updated
+  boundary: Moderation covers Arena-hosted play. It makes no claim about what players run
+    privately.
+  surfaces:
+    allow: *id005
+    deny:
+    - artifacts/
+  humanGate: false
+- id: F1
+  type: implementation
+  title: Project eligible match results to localnet then devnet
+  status: cancelled
+  objective: Real players generating real evidence is a better tester gate than recruiting
+    people to run conformance suites.
+  epic: E15
+  lane: SL-F
+  phase: P4
+  parent: null
+  dependsOn:
+  - C6
+  - C9
+  acceptance:
+  - Localnet rehearsal passes before devnet is touched
+  - No personal or rich metadata appears on chain
+  - Every projection reconciles to exactly one off-chain receipt
+  tests:
+  - id: T-087
+    command: 'python3 tests/test_arena.py  # implement T-087 per docs/TEST-PLAN.md; keep suite
+      green'
+  - id: T-088
+    command: 'python3 tests/test_arena.py  # implement T-088 per docs/TEST-PLAN.md; keep suite
+      green'
+  - id: T-089
+    command: 'python3 tests/test_arena.py  # implement T-089 per docs/TEST-PLAN.md; keep suite
+      green'
+  evidence:
+    required:
+    - test-output
+    - pr-review
+    - spdd artifact (spdd/prompt/*-f1-*.md) Sync Log updated
+  boundary: Devnet proof is not mainnet readiness. Rich metadata stays off-chain; only hashes
+    and references project.
+  surfaces:
+    allow: &id006
+    - docs/
+    - tools/
+    - README.md
+    - tests/
+    deny:
+    - artifacts/
+  humanGate: false
+  note: STRUCK per docs/REVISED-RECOMMENDATION.md - violates the 2026-07-26 automation pause.
+    Never schedule. Any successor on-chain lane must be a NEW decision node with explicit
+    operator approval.
+- id: F2
+  type: implementation
+  title: Assemble the external tester evidence packet
+  status: cancelled
+  objective: This is the concrete artifact the release ladder is waiting on.
+  epic: E15
+  lane: SL-F
+  phase: P4
+  parent: null
+  dependsOn:
+  - F1
+  acceptance:
+  - The packet includes a written non-claims section
+  - Failed and anomalous matches are included, not filtered out
+  - Every claim in the packet cites a specific artifact
+  tests:
+  - id: T-090
+    command: 'python3 tests/test_arena.py  # implement T-090 per docs/TEST-PLAN.md; keep suite
+      green'
+  - id: T-091
+    command: 'python3 tests/test_arena.py  # implement T-091 per docs/TEST-PLAN.md; keep suite
+      green'
+  evidence:
+    required:
+    - test-output
+    - pr-review
+    - spdd artifact (spdd/prompt/*-f2-*.md) Sync Log updated
+  boundary: The packet is evidence for review. It is not audit completion and must never be
+    described as such.
+  surfaces:
+    allow: *id006
+    deny:
+    - artifacts/
+  humanGate: false
+  note: STRUCK per docs/REVISED-RECOMMENDATION.md - violates the 2026-07-26 automation pause.
+    Never schedule. Any successor on-chain lane must be a NEW decision node with explicit
+    operator approval.
+- id: F3
+  type: implementation
+  title: Establish the one-way canonicality workflow
+  status: ready
+  objective: The binding rule is that spec flows down and findings flow up. A proof project
+    is exactly where that discipline erodes first.
+  epic: E16
+  lane: SL-F
+  phase: P0
+  parent: null
+  dependsOn:
+  - A1
+  acceptance:
+  - CI fails if a vendored ADL schema diverges from the pinned upstream hash
+  - Every finding has an upstream reference and a disposition
+  - No Arena document redefines an ADL semantic
+  tests:
+  - id: T-092
+    command: 'python3 tests/test_arena.py  # implement T-092 per docs/TEST-PLAN.md; keep suite
+      green'
+  - id: T-093
+    command: 'python3 tests/test_arena.py  # implement T-093 per docs/TEST-PLAN.md; keep suite
+      green'
+  evidence:
+    required:
+    - test-output
+    - pr-review
+    - spdd artifact (spdd/prompt/*-f3-*.md) Sync Log updated
+  boundary: Arena may propose. Only the lab may make an ADL semantic canonical.
+  surfaces:
+    allow: *id006
+    deny:
+    - artifacts/
+  humanGate: false
+- id: F4
+  type: implementation
+  title: Enforce claims discipline across all public Arena surfaces
+  status: blocked
+  objective: The 2026-08-01 operational correction exists because planning was being reported
+    as implementation. A public game multiplies that risk.
+  epic: E16
+  lane: SL-F
+  phase: P0
+  parent: null
+  dependsOn:
+  - F3
+  acceptance:
+  - No public surface claims audit completion or mainnet readiness
+  - Every capability claim links to a passing test or a published artifact
+  - A closed planning issue is never rendered as a shipped capability
+  tests:
+  - id: T-094
+    command: 'python3 tests/test_arena.py  # implement T-094 per docs/TEST-PLAN.md; keep suite
+      green'
+  - id: T-095
+    command: 'python3 tests/test_arena.py  # implement T-095 per docs/TEST-PLAN.md; keep suite
+      green'
+  evidence:
+    required:
+    - test-output
+    - pr-review
+    - spdd artifact (spdd/prompt/*-f4-*.md) Sync Log updated
+  boundary: This issue governs what Arena says about itself. It creates no technical capability.
+  surfaces:
+    allow: *id006
+    deny:
+    - artifacts/
+  humanGate: false
+- id: DEC-C-UNPARK
+  type: decision
+  title: Decide whether to un-park the SL-C lane after the 2026-08-31 launch
+  status: parked
+  objective: 'Record the consequential go/no-go for this parked lane as an ADR with rationale,
+    scope, and any narrowed mandate. For SL-C the decision is tied to the ADL v0.3 price-discovery
+    intake (reddiagent-lab#440 / #389 seed 2).'
+  parent: null
+  dependsOn: []
+  informs:
+  - C1
+  acceptance:
+  - ADR records options, tradeoffs, decision, and consequences.
+  - Human approval is recorded on the GitHub issue.
+  tests:
+  - id: DEC-C-UNPARK-T1
+    command: test -f docs/adr/DEC-C-UNPARK.md
+  evidence:
+    required:
+    - docs/adr/DEC-C-UNPARK.md
+    - human-approval
+  boundary: Not before the 2026-08-31 launch. Deciding does not implement; gated nodes stay
+    parked until this node is done.
+  surfaces:
+    allow:
+    - docs/adr/
+    - planning/
+    deny: []
+  humanGate: true
+- id: DEC-D-UNPARK
+  type: decision
+  title: Decide whether to un-park the SL-D lane after the 2026-08-31 launch
+  status: parked
+  objective: Record the consequential go/no-go for this parked lane as an ADR with rationale,
+    scope, and any narrowed mandate.
+  parent: null
+  dependsOn: []
+  informs:
+  - D1
+  - D3
+  acceptance:
+  - ADR records options, tradeoffs, decision, and consequences.
+  - Human approval is recorded on the GitHub issue.
+  tests:
+  - id: DEC-D-UNPARK-T1
+    command: test -f docs/adr/DEC-D-UNPARK.md
+  evidence:
+    required:
+    - docs/adr/DEC-D-UNPARK.md
+    - human-approval
+  boundary: Not before the 2026-08-31 launch. Deciding does not implement; gated nodes stay
+    parked until this node is done.
+  surfaces:
+    allow:
+    - docs/adr/
+    - planning/
+    deny: []
+  humanGate: true
+- id: DEC-E-UNPARK
+  type: decision
+  title: Decide whether to un-park the SL-E lane after the 2026-08-31 launch
+  status: parked
+  objective: Record the consequential go/no-go for this parked lane as an ADR with rationale,
+    scope, and any narrowed mandate.
+  parent: null
+  dependsOn: []
+  informs:
+  - E3I
+  acceptance:
+  - ADR records options, tradeoffs, decision, and consequences.
+  - Human approval is recorded on the GitHub issue.
+  tests:
+  - id: DEC-E-UNPARK-T1
+    command: test -f docs/adr/DEC-E-UNPARK.md
+  evidence:
+    required:
+    - docs/adr/DEC-E-UNPARK.md
+    - human-approval
+  boundary: Not before the 2026-08-31 launch. Deciding does not implement; gated nodes stay
+    parked until this node is done.
+  surfaces:
+    allow:
+    - docs/adr/
+    - planning/
+    deny: []
+  humanGate: true
+- id: GE01
+  type: implementation
+  title: 'Adopt graph engineering: canonical execution graph, lint, role prompts'
+  status: ready
+  objective: Land planning/graph.yaml as the canonical execution graph (migrated from plan/backlog.yaml),
+    tools/graph_lint.py as a test gate, and the four role prompts; wire the workflow into
+    CLAUDE.md.
+  parent: null
+  dependsOn: []
+  produces:
+  - artifact:planning/graph.yaml
+  acceptance:
+  - planning/graph.yaml lints clean and encodes every backlog issue, the decision gates for
+    parked lanes, and F1/F2 as cancelled.
+  - tools/graph_lint.py validates statuses, required fields, and DAG acyclicity.
+  - planning/prompts/ carries bootstrap, node-executor, supervisor, and retrospective prompts
+    adapted to this repo.
+  - CLAUDE.md documents the node workflow (claim, branch node/<ID>-<slug>, PR evidence boundary,
+    rebase gate).
+  - Full arena suite stays green.
+  tests:
+  - id: GE01-T1
+    command: python3 tools/graph_lint.py
+  - id: GE01-T2
+    command: python3 tests/test_arena.py
+  evidence:
+    required:
+    - test-output
+    - pr-review
+  boundary: Process only. No crons, loops, or packet/gate/handoff/signoff scripts (2026-07-26
+    automation pause). Does not change any game or spec behavior, and does not un-park any
+    lane.
+  surfaces:
+    allow:
+    - planning/
+    - tools/
+    - docs/adr/
+    - CLAUDE.md
+    deny:
+    - core/
+    - web/
+    - adl/
+  humanGate: false
+- id: GE02
+  type: implementation
+  title: Sync native GitHub relations for the issue graph
+  status: blocked
+  dependsOn:
+  - GE01
+  objective: 'Mirror graph edges onto GitHub: epic parent issues with sub-issue links, and
+    blocked-by relations where the API supports them; text depends-on lines remain as readable
+    redundancy.'
+  parent: null
+  acceptance:
+  - Each epic is a GitHub issue with its nodes attached as sub-issues.
+  - Dependency relations visible on GitHub match graph.yaml dependsOn.
+  - No volatile GitHub state is written back into planning/graph.yaml.
+  tests:
+  - id: GE02-T1
+    command: 'python3 tools/graph_lint.py  # graph unchanged by sync'
+  evidence:
+    required:
+    - pr-review
+    - issue-link-audit
+  boundary: Metadata sync only; creates no workflow automation.
+  surfaces:
+    allow:
+    - planning/
+    - tools/
+    deny: []
+  humanGate: false
+- id: GE03
+  type: verification
+  title: 'Pilot meta-retrospective: promote, adjust, or abandon the graph template'
+  status: blocked
+  dependsOn:
+  - GE01
+  objective: After 3-5 executable nodes complete full claim->PR->retrospective cycles, mine
+    the audit trail with planning/prompts/30-retrospective.md and recommend PROJECT-SPECIFIC
+    vs TEMPLATE-CANDIDATE changes. Promotion to reddiagent-lab or reddi-agent-protocol requires
+    this node.
+  parent: null
+  acceptance:
+  - At least 3 nodes have completed the full cycle with evidence.
+  - Retrospective classifies recommendations and records the promote/adjust/abandon decision
+    with human approval.
+  tests:
+  - id: GE03-T1
+    command: test -f docs/adr/GE03-pilot-verdict.md
+  evidence:
+    required:
+    - docs/adr/GE03-pilot-verdict.md
+    - human-approval
+  boundary: Recommends only; template promotion to other repos is a separate decision in those
+    repos.
+  surfaces:
+    allow:
+    - docs/adr/
+    - planning/
+    deny: []
+  humanGate: true
