@@ -116,6 +116,32 @@ _va = _sp.run([sys.executable, str(ROOT / "tools" / "validate_adl.py")],
 check("T-003/T-004 validator enforces the manifest (zero silent passes)",
       _va.returncode == 0 and "FAIL" not in _va.stdout)
 
+print("one-way canonicality (F3: T-092 T-093)")
+import hashlib as _hl
+import re as _re093
+_val_src = (ROOT / "tools" / "validate_adl.py").read_text()
+_pinned = _re093.search(r'PINNED = "([0-9a-f]{64})"', _val_src).group(1)
+_actual = _hl.sha256((ROOT / "vendor" / "ADL-v0.2.schema.json").read_bytes()).hexdigest()
+check("T-092 vendored schema matches the pinned upstream hash (drift fails CI)",
+      _actual == _pinned)
+_find = (ROOT / "docs" / "FINDINGS.md").read_text()
+_sections = set(_re093.findall(r"^### (F-\d{3})", _find, _re093.M)) - {"F-004a"}
+_rows = dict(_re093.findall(r"^\| (F-\d{3})[^|]* \| ([^|]+) \|", _find, _re093.M))
+check("T-093 every finding section has a register row",
+      _sections <= set(_rows))
+check("T-093 every non-withdrawn register row carries an upstream reference",
+      all("withdrawn" in _find.split(f"| {f} |")[1].split("\n")[0]
+          or "reddiagent-lab" in _find.split(f"| {f} |")[1].split("\n")[0]
+          for f in _rows))
+_canonical_ext = {"x402", "receipts", "reputation", "identity"}
+_fork_free = True
+for _p in sorted((ROOT / "adl").glob("*.yaml")):
+    for _k in (_y.safe_load(_p.read_text()).get("extensions") or {}):
+        if _k not in _canonical_ext and not _k.startswith("x-"):
+            _fork_free = False
+check("T-093 no Arena document redefines an ADL semantic (x- namespace only)",
+      _fork_free)
+
 print("power-up actually changes outcomes")
 flips = sum(
     run_vault_match(DEF, RAID, seed=s)["winner"]

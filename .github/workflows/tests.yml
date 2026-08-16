@@ -1,0 +1,19 @@
+# F3 (T-092): CI gate — fails on vendored-schema drift, ADL forks, or any
+# red test. Runs the same three commands CLAUDE.md requires before any PR.
+name: tests
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pyyaml jsonschema solders
+      - run: python3 tools/validate_adl.py
+      - run: python3 tools/graph_lint.py
+      - run: python3 tests/test_arena.py

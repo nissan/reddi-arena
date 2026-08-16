@@ -11,9 +11,9 @@ The binding rule is that spec flows down and findings flow up. A proof project i
 
 **DoD checklist:**
 
-- [ ] CI fails if a vendored ADL schema diverges from the pinned upstream hash
-- [ ] Every finding has an upstream reference and a disposition
-- [ ] No Arena document redefines an ADL semantic
+- [x] CI fails if a vendored ADL schema diverges from the pinned upstream hash
+- [x] Every finding has an upstream reference and a disposition
+- [x] No Arena document redefines an ADL semantic
 
 ## E — Entities / Handoff Objects
 
@@ -90,3 +90,4 @@ Arena may propose. Only the lab may make an ADL semantic canonical.
 | Date | Divergence | Artifact update | Code/test update |
 |---|---|---|---|
 | 2026-08-05 | Generated from plan/backlog.yaml (ready) | initial | n/a |
+| 2026-08-16 | Workflow was already being exercised (F-007/F-002/F-001 filed earlier today) but was undocumented and unenforced. This node formalizes it: disposition register in docs/FINDINGS.md covering all eleven findings (F-003, F-005, F-010, F-011 newly filed as lab#445/#446/#443/#444; F-008 recorded as duplicate of lab v0.3 candidate #3), T-092 hash-drift check asserted in-suite, T-093 register-completeness + no-ADL-fork lint, and a real CI gate (.github/workflows/tests.yml) running all three verification commands on push/PR. T-093 immediately caught a real omission during implementation: F-008 had no register row. | DoD checked; this row | tests/test_arena.py +4 checks (suite 68→72); .github/workflows/tests.yml added. Executed as graph node F3 (branch node/F3-one-way-canonicality) under the GE01 pilot. |

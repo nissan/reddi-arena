@@ -13,6 +13,36 @@ one-way canonicality rule. None of them proposes changing ADL unilaterally.
 
 ---
 
+## One-way canonicality — upstream disposition register (F3)
+
+The binding rule: **spec flows down from the lab; findings flow up through
+`lab:docs/OPEN-SPEC-REVIEW-INTAKE.md`.** The Arena never redefines an ADL
+semantic; Arena-local vocabulary lives under `extensions.x-arena`, and
+compensating lints are documented as such, never as spec fixes. Every finding
+below has exactly one disposition; T-093 asserts this register stays complete.
+
+| Finding | Disposition | Upstream reference |
+|---|---|---|
+| F-001 | evidence-attached (known v0.3 candidate) | [reddiagent-lab#389 comment](https://github.com/nissan/reddiagent-lab/issues/389#issuecomment-5307173420) |
+| F-002 | filed | [reddiagent-lab#441](https://github.com/nissan/reddiagent-lab/issues/441) |
+| F-003 | filed | [reddiagent-lab#445](https://github.com/nissan/reddiagent-lab/issues/445) |
+| F-004 | withdrawn (spec prose answers it) | n/a — see section below |
+| F-005 | filed | [reddiagent-lab#446](https://github.com/nissan/reddiagent-lab/issues/446) |
+| F-006 | evidence-attached (related observation) | [reddiagent-lab#389 comment](https://github.com/nissan/reddiagent-lab/issues/389#issuecomment-5307173420) |
+| F-007 | filed | [reddiagent-lab#440](https://github.com/nissan/reddiagent-lab/issues/440) |
+| F-008 | duplicate (lab v0.3 candidate #3, tracked upstream) | [reddiagent-lab#389](https://github.com/nissan/reddiagent-lab/issues/389) |
+| F-009 | folded into F-007 filing | [reddiagent-lab#440](https://github.com/nissan/reddiagent-lab/issues/440) |
+| F-010 | filed | [reddiagent-lab#443](https://github.com/nissan/reddiagent-lab/issues/443) |
+| F-011 | filed | [reddiagent-lab#444](https://github.com/nissan/reddiagent-lab/issues/444) |
+
+Disposition vocabulary: `filed` (own intake issue), `evidence-attached`
+(reproduction added to an existing lab item), `duplicate` (already tracked
+upstream, nothing new to add), `folded` (carried inside another filing),
+`withdrawn` (Arena error, retained for the record). Lab responses
+(accepted / rejected / deferred) are recorded here as they arrive.
+
+---
+
 ## Drift corrected in the Arena documents (not spec issues)
 
 Reconstructing ADL from prose got these wrong. Recording them because they are
@@ -112,6 +142,8 @@ an explicit `unit` escape hatch.
 
 ### F-003 — `x402-dry-run` is a rail, not a mode
 
+**Filed upstream 2026-08-16:** [reddiagent-lab#445](https://github.com/nissan/reddiagent-lab/issues/445).
+
 Because the safe rail is a member of the same enum as `solana`/`base`/`stripe`,
 "is this document safe to execute" requires inspecting every `rails` array in
 every intent and authority block. A top-level `enabled`/`livePaymentAccess`
@@ -141,6 +173,8 @@ prose spec would prevent that.
 
 ### F-010 — Schema permits duplicate tool/function/skill ids
 
+**Filed upstream 2026-08-16:** [reddiagent-lab#443](https://github.com/nissan/reddiagent-lab/issues/443).
+
 Found building the A2 negative corpus (2026-08-16): `harness.tools` (and
 `functions`, `skills`) carry no `uniqueItems` constraint and no cross-item id
 uniqueness rule, so a document declaring the same tool id twice is
@@ -150,6 +184,8 @@ wins. Repro: `fixtures/negative/duplicate-tool-id.yaml` (schema-valid;
 rejected by the Arena-local `duplicate-id` lint in `tools/validate_adl.py`).
 
 ### F-011 — Unknown keys on tool objects validate silently
+
+**Filed upstream 2026-08-16:** [reddiagent-lab#444](https://github.com/nissan/reddiagent-lab/issues/444).
 
 `$defs.tool` sets `additionalProperties: true`, so a typo on a
 security-relevant key — `sideEffect` for `sideEffects` — validates cleanly
@@ -163,6 +199,8 @@ conversation about `additionalProperties: false` (or a vendor-prefix rule)
 on `tool`, `dataSource`, and `policy` objects at v0.3.
 
 ### F-005 — `policy.scope.type` and `paymentScope.type` use different enums
+
+**Filed upstream 2026-08-16:** [reddiagent-lab#446](https://github.com/nissan/reddiagent-lab/issues/446).
 
 `paymentScope.type` includes `service`; `policy.scope.type` does not. A payment
 policy therefore cannot mirror the scope type of the intent it governs, which
