@@ -76,7 +76,7 @@ nodes:
 - id: A2
   type: implementation
   title: Build the Arena negative-fixture corpus
-  status: ready
+  status: done
   objective: Invalid documents must fail for the stated reason, not incidentally.
   epic: E01
   lane: SL-A
@@ -100,6 +100,11 @@ nodes:
     - test-output
     - pr-review
     - spdd artifact (spdd/prompt/*-a2-*.md) Sync Log updated
+    recorded:
+    - 'PR #40 (merged 2026-08-16, closes #2): 24-fixture corpus with manifest-driven
+      T-003/T-004 enforcement, suite 63->68 green pre/post rebase; NEW findings
+      F-010 (duplicate ids schema-valid) and F-011 (unknown tool keys schema-valid)
+      logged with repro fixtures and arena-lint compensating checks.'
   boundary: Fixtures are review artifacts; they do not define new ADL semantics.
   surfaces:
     allow: *id001
