@@ -162,3 +162,15 @@ wrong-kind.yaml:
   expectSchemaValid: false
   lint: null
   reason: kind must be the constant 'Agent'
+x-arena-payment-intent.yaml:
+  expectSchemaValid: true
+  finding: A3-profile
+  lint: x-arena-payment-semantics
+  reason: payment machinery (an x402-style intents block) smuggled under x-arena — schema-valid
+    (x- namespaces are open objects); the A3 profile forbids it
+x-arena-unspecified-key.yaml:
+  expectSchemaValid: true
+  finding: A3-profile
+  lint: x-arena-unknown-key
+  reason: an x-arena key outside the closed v0.1 vocabulary — schema-valid; the A3 profile
+    lint rejects it

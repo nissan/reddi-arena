@@ -48,8 +48,46 @@ def arena_lint(doc):
             if key not in known_tool_keys:
                 diags.append(("unknown-tool-key",
                               f"tool {tool.get('id')!r} carries unknown key {key!r}"))
+    # x-arena profile checks (A3 / docs/ARENA-PROFILE-v0.1.md): closed top-level
+    # vocabulary; payment machinery forbidden at any depth (price display fields
+    # are the documented F-007 exception).
+    xarena = (doc.get("extensions") or {}).get("x-arena")
+    if isinstance(xarena, dict):
+        allowed = {"league", "strategy", "listing", "price", "grants",
+                   "format", "declaredClass", "fuelCap", "seasonId"}
+        forbidden = {"intents", "authority", "rails", "receipts", "requireReceipt",
+                     "receiptRef", "policyRefs", "spend", "refund", "charge",
+                     "settlement", "wallet", "facilitator"}
+        for key in xarena:
+            if key not in allowed:
+                diags.append(("x-arena-unknown-key",
+                              f"x-arena carries unspecified key {key!r}"))
+
+        def walk(obj, path):
+            if isinstance(obj, dict):
+                for k, v in obj.items():
+                    if k in forbidden:
+                        diags.append(("x-arena-payment-semantics",
+                                      f"payment machinery {k!r} under x-arena at {path}"))
+                    walk(v, f"{path}.{k}")
+            elif isinstance(obj, list):
+                for i, v in enumerate(obj):
+                    walk(v, f"{path}[{i}]")
+
+        walk(xarena, "x-arena")
     return diags
 
+
+# T-005: the real Arena documents must be lint-clean, not just schema-valid —
+# their x-arena blocks stay inside the specified profile.
+for path in sorted(glob.glob("adl/*.yaml")):
+    diags = arena_lint(yaml.safe_load(open(path)))
+    if diags:
+        for code, msg in diags:
+            print(f"  T-005 FAIL {path}: [{code}] {msg}")
+        rc = 1
+    else:
+        print(f"  T-005 PASS {path}: x-arena profile clean")
 
 manifest = yaml.safe_load(open("fixtures/negative/manifest.yaml"))
 neg_fail = 0
