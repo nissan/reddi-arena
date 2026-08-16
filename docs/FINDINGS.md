@@ -139,6 +139,29 @@ evidence." As written, the two field names read as a contradiction and the first
 instinct of an implementer is to set `citationRequired: false`. A note in the
 prose spec would prevent that.
 
+### F-010 — Schema permits duplicate tool/function/skill ids
+
+Found building the A2 negative corpus (2026-08-16): `harness.tools` (and
+`functions`, `skills`) carry no `uniqueItems` constraint and no cross-item id
+uniqueness rule, so a document declaring the same tool id twice is
+schema-valid. Every consumer that indexes capabilities by id (weigh-in,
+policy matching, runtime binding) must decide unilaterally which declaration
+wins. Repro: `fixtures/negative/duplicate-tool-id.yaml` (schema-valid;
+rejected by the Arena-local `duplicate-id` lint in `tools/validate_adl.py`).
+
+### F-011 — Unknown keys on tool objects validate silently
+
+`$defs.tool` sets `additionalProperties: true`, so a typo on a
+security-relevant key — `sideEffect` for `sideEffects` — validates cleanly
+while the declared side effects silently vanish from every consumer that
+reads the correct key (weight, policy linkage, audit). For a document format
+whose value proposition is "the declaration is a contract", silent key loss
+on the security surface is a sharp edge. Repro:
+`fixtures/negative/tool-sideeffect-singular-typo.yaml` (schema-valid;
+rejected by the Arena-local `unknown-tool-key` lint). Worth an upstream
+conversation about `additionalProperties: false` (or a vendor-prefix rule)
+on `tool`, `dataSource`, and `policy` objects at v0.3.
+
 ### F-005 — `policy.scope.type` and `paymentScope.type` use different enums
 
 `paymentScope.type` includes `service`; `policy.scope.type` does not. A payment
