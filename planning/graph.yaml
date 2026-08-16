@@ -1320,7 +1320,7 @@ nodes:
 - id: F3
   type: implementation
   title: Establish the one-way canonicality workflow
-  status: ready
+  status: done
   objective: The binding rule is that spec flows down and findings flow up. A proof project
     is exactly where that discipline erodes first.
   epic: E16
@@ -1345,6 +1345,10 @@ nodes:
     - test-output
     - pr-review
     - spdd artifact (spdd/prompt/*-f3-*.md) Sync Log updated
+    recorded:
+    - 'PR #41 (merged 2026-08-16, closes #35): all eleven findings routed upstream
+      (register in docs/FINDINGS.md; new filings lab#443-#446), T-092/T-093
+      in-suite, CI workflow added; suite 68->72 green pre/post rebase.'
   boundary: Arena may propose. Only the lab may make an ADL semantic canonical.
   surfaces:
     allow: *id006
@@ -1354,7 +1358,7 @@ nodes:
 - id: F4
   type: implementation
   title: Enforce claims discipline across all public Arena surfaces
-  status: blocked
+  status: ready
   objective: The 2026-08-01 operational correction exists because planning was being reported
     as implementation. A public game multiplies that risk.
   epic: E16
