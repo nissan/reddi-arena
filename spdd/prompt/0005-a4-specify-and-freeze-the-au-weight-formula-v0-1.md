@@ -11,9 +11,9 @@ If weight is not deterministic and independently recomputable, the whole competi
 
 **DoD checklist:**
 
-- [ ] Same document yields identical AU and hash across runs, machines, and key order
-- [ ] Certificate records weightsVersion so old results stay interpretable
-- [ ] Reordering YAML keys does not change the hash
+- [x] Same document yields identical AU and hash across runs, machines, and key order
+- [x] Certificate records weightsVersion so old results stay interpretable
+- [x] Reordering YAML keys does not change the hash
 
 ## E — Entities / Handoff Objects
 
@@ -92,3 +92,4 @@ A weight certificate authorizes nothing; it is an eligibility input only.
 | Date | Divergence | Artifact update | Code/test update |
 |---|---|---|---|
 | 2026-08-05 | Generated from plan/backlog.yaml (ready) | initial | n/a |
+| 2026-08-16 | O-tasks 1–4 were already implemented (docs/WEIGHT-CLASS-v0.1.md, tools/weigh_in.py: pure `weigh()`, `capabilityHash`, `weightsVersion=arena-weights-v0.1`) but unfrozen and untested against T-007/8/9. Node work = the freeze itself + the doneness tests, not new formula code. | DoD checked; this row | tests/test_arena.py: 8 new checks (T-007 ×2, T-008 ×2, T-009 ×2, freeze assertions ×2), suite 55→63; spec status draft→frozen with v0.2 change path. Executed as graph node A4 (branch node/A4-freeze-au-weight-formula) under the GE01 pilot. |

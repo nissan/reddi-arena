@@ -1,7 +1,11 @@
 # Reddi Arena — Weight Class Specification v0.1
 
-**Status:** draft, Arena-local. Not an ADL semantic. Nothing here modifies or
-extends canonical ADL v0.2; the formula is a *consumer* of a validated document.
+**Status:** frozen (v0.1, `arena-weights-v0.1`, frozen 2026-08-16 under issue
+A4). Arena-local. Not an ADL semantic. Nothing here modifies or extends
+canonical ADL v0.2; the formula is a *consumer* of a validated document.
+Changes to the AU table, class bands, or coupling go through a v0.2 formula
+spec with a new `weightsVersion` — never a mid-season edit. Historical
+certificates stay interpretable through their recorded `weightsVersion`.
 
 **Boundary:** a weight certificate is an eligibility input. It authorizes no
 provider call, no credential, no network access, no MCP resolution, no wallet,

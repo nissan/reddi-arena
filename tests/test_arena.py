@@ -54,6 +54,50 @@ check("refusal shows the AU delta", d_ant.au_delta == 65 and d_ant.fielded_au ==
 d_beetle = evaluate_hire(DEF, MERC, "Beetleweight")
 check("same hire allowed at Beetleweight", d_beetle.allowed)
 
+print("weight formula freeze (A4: T-007 T-008 T-009)")
+from weigh_in import weigh, WEIGHTS_VERSION
+
+# T-007 — determinism: identical certificate and hash across repeated runs.
+_certs = [weigh(DEF) for _ in range(100)]
+check("T-007 100 runs yield one identical certificate",
+      len({c["capabilityHash"] for c in _certs}) == 1
+      and len({c["soloAU"] for c in _certs}) == 1)
+check("T-007 certificate records weightsVersion arena-weights-v0.1",
+      _certs[0]["weightsVersion"] == WEIGHTS_VERSION == "arena-weights-v0.1")
+
+
+def _reorder(obj, reverse=True):
+    """Deep-copy with recursively reversed key insertion order."""
+    if isinstance(obj, dict):
+        return {k: _reorder(obj[k], reverse)
+                for k in (reversed(list(obj)) if reverse else obj)}
+    if isinstance(obj, list):
+        return [_reorder(v, reverse) for v in obj]
+    return obj
+
+
+# T-008 — key order and formatting never alter AU or hash.
+_shuffled = _reorder(DEF)
+check("T-008 reversed key order yields identical AU and hash",
+      weigh(_shuffled)["capabilityHash"] == _certs[0]["capabilityHash"]
+      and weigh(_shuffled)["soloAU"] == _certs[0]["soloAU"])
+import yaml as _yaml
+_reparsed = _yaml.safe_load(_yaml.safe_dump(_shuffled, default_flow_style=True))
+check("T-008 YAML reserialization (flow style) yields identical hash",
+      weigh(_reparsed)["capabilityHash"] == _certs[0]["capabilityHash"])
+
+# T-009 — golden weights for the reference documents.
+check("T-009 defender weighs exactly 62 AU", weigh(DEF)["soloAU"] == 62)
+check("T-009 mercenary weighs exactly 91 AU", weigh(MERC)["soloAU"] == 91)
+
+# The formula is frozen: the spec document must say so, and changes must go
+# through a v0.2 formula spec, never a mid-season edit (CLAUDE.md boundary).
+_spec = (ROOT / "docs" / "WEIGHT-CLASS-v0.1.md").read_text()
+check("frozen spec: status is frozen, not draft",
+      "**Status:** frozen" in _spec and "draft" not in _spec.split("\n")[2])
+check("frozen spec: mid-season change path is a v0.2 formula spec",
+      "v0.2" in _spec)
+
 print("power-up actually changes outcomes")
 flips = sum(
     run_vault_match(DEF, RAID, seed=s)["winner"]
