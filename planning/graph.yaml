@@ -144,7 +144,7 @@ nodes:
 - id: A4
   type: implementation
   title: Specify and freeze the AU weight formula v0.1
-  status: ready
+  status: done
   objective: If weight is not deterministic and independently recomputable, the whole competitive
     frame collapses.
   epic: E02
@@ -172,6 +172,10 @@ nodes:
     - test-output
     - pr-review
     - spdd artifact (spdd/prompt/*-a4-*.md) Sync Log updated
+    recorded:
+    - 'PR #39 (merged 2026-08-16, closes #4): T-007/T-008/T-009 implemented, suite
+      55->63 green before and after rebase; spec frozen at arena-weights-v0.1 with
+      v0.2 change path; Sync Log updated in-PR.'
   boundary: A weight certificate authorizes nothing; it is an eligibility input only.
   surfaces:
     allow: *id001
@@ -181,7 +185,7 @@ nodes:
 - id: A5
   type: implementation
   title: Implement coupled weight for hired specialists
-  status: blocked
+  status: ready
   objective: The class-bump-on-hire tradeoff is the core strategic mechanic and must be computed
     identically by every implementation.
   epic: E02
@@ -218,7 +222,7 @@ nodes:
 - id: A6
   type: verification
   title: Anti-gaming review of the weight formula
-  status: blocked
+  status: ready
   objective: Any scoring function invites optimisation against its own artifacts.
   epic: E02
   lane: SL-A
@@ -251,7 +255,7 @@ nodes:
 - id: A7
   type: implementation
   title: Map conformance levels to league tiers
-  status: blocked
+  status: ready
   objective: This is the teaching mechanism — players learn the spec by ranking up, not by
     reading it.
   epic: E03
