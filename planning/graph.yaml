@@ -1553,7 +1553,7 @@ nodes:
 - id: GE03
   type: verification
   title: 'Pilot meta-retrospective: promote, adjust, or abandon the graph template'
-  status: blocked
+  status: done
   dependsOn:
   - GE01
   objective: After 3-5 executable nodes complete full claim->PR->retrospective cycles, mine
@@ -1572,6 +1572,11 @@ nodes:
     required:
     - docs/adr/GE03-pilot-verdict.md
     - human-approval
+    recorded:
+    - 'PR #43 (merged 2026-08-16, closes #42): ADR docs/adr/GE03-pilot-verdict.md;
+      verdict adjust-now-promote-post-launch approved by Nissan 2026-08-16 and
+      recorded on issue #42; merge policy rebase/linear enforced (maintainer
+      settings toggle owed); four cycles GE01/A4/A2/F3 evidenced.'
   boundary: Recommends only; template promotion to other repos is a separate decision in those
     repos.
   surfaces:
