@@ -1465,7 +1465,7 @@ nodes:
 - id: GE01
   type: implementation
   title: 'Adopt graph engineering: canonical execution graph, lint, role prompts'
-  status: ready
+  status: done
   objective: Land planning/graph.yaml as the canonical execution graph (migrated from plan/backlog.yaml),
     tools/graph_lint.py as a test gate, and the four role prompts; wire the workflow into
     CLAUDE.md.
@@ -1491,6 +1491,10 @@ nodes:
     required:
     - test-output
     - pr-review
+    recorded:
+    - 'PR #38 (merged 2026-08-16, closes #37): 55/55 arena tests, validate_adl PASS,
+      plan_lint L1-L7 PASS, graph_lint G1-G7 PASS with READY frontier A2, A3, A4,
+      B1, F3.'
   boundary: Process only. No crons, loops, or packet/gate/handoff/signoff scripts (2026-07-26
     automation pause). Does not change any game or spec behavior, and does not un-park any
     lane.
@@ -1508,7 +1512,7 @@ nodes:
 - id: GE02
   type: implementation
   title: Sync native GitHub relations for the issue graph
-  status: blocked
+  status: ready
   dependsOn:
   - GE01
   objective: 'Mirror graph edges onto GitHub: epic parent issues with sub-issue links, and
