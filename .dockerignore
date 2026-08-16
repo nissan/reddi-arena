@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+core/ledger.json
+core/waitlist.json
+docs/
+plan/
+tests/
+findings/
+tutorials/
+fixtures/
+*.md

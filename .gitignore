@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+core/ledger.json
+core/waitlist.json
+rehearsal-preflight.json
+.DS_Store

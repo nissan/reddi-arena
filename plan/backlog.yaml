@@ -1,0 +1,946 @@
+# Reddi Arena — canonical programme plan (source of truth)
+# ---------------------------------------------------------------------------
+# ROADMAP.md, BACKLOG.md and TEST-PLAN.md are PROJECTIONS of this file, rendered
+# by tools/render_plan.py. Edit here, never in the markdown.
+#
+# Invariants enforced by tools/plan_lint.py:
+#   L1  every issue belongs to an epic; every epic to a swimlane and phase
+#   L2  the dependency graph is a DAG (no cycles)
+#   L3  no issue depends on an issue in a later phase
+#   L4  every issue has >= 1 automated test and >= 1 acceptance criterion
+#   L5  every test maps to >= 1 existing issue
+#   L6  every issue has an explicit boundary statement (what it does NOT authorize)
+#   L7  no issue in a blocked phase is schedulable
+
+programme: reddi-arena
+planVersion: plan-v0.4-superseded
+dated: 2026-08-05
+supersededBy: docs/REVISED-RECOMMENDATION.md
+supersededOn: 2026-08-05
+supersededReason: >-
+  reddiagent-lab went public and revealed a 2026-08-31 launch critical path
+  shared by three commitments, a standing pause on new packet/gate automation
+  (which issues F1 and F2 violate), and an existing learning path whose ten
+  lessons mirror the Arena league ladder. The programme as scoped is not
+  recommended. This file is retained as the fuller design, not as work to run.
+revisionNotes: >-
+  v0.2 supersedes v0.1 after issue A1 was executed for real against the
+  published ADL v0.2 JSON Schema (sha256 679a5c3e...). Both reference documents
+  now validate. Fifteen drift corrections and five spec findings are recorded in
+  docs/FINDINGS.md. The material plan change is PC-01: @reddi/agent-protocol
+  already ships receipts, receipt-evidence-binding, policy, buyer-authority-
+  policy, evidence-archive, attestation-reputation, offchain-reputation-preview
+  and discovery-source, so five SL-C issues are rescoped from "build" to
+  "integrate". SL-C shrinks substantially as a result.
+relationToLab: >-
+  Reddi Arena is a downstream proof consumer. ADL semantics flow one way from
+  reddiagent-lab into this programme. Arena never forks ADL; it files findings
+  back as issues and evidence. Any Arena-local vocabulary lives under an x-
+  extension namespace until the lab accepts it.
+
+phases:
+  - id: P0
+    name: Foundry
+    intent: Deterministic only. Validation, weight, fixtures, paper matches. Zero execution.
+    exitGate: All P0 tests green; ADL fixtures validate against published schema.
+    schedulable: true
+  - id: P1
+    name: First Blood
+    intent: >-
+      Local bounded execution at conformance Level 1. Antweight only, Vault only,
+      no hires, and NO PURSE — Level 1 forbids the payment extension outright.
+    exitGate: 100 consecutive local matches with complete traces and zero policy escapes.
+    schedulable: true
+  - id: P2
+    name: Mercenary Market
+    intent: Discover/Decide/Prove. Dry-run escrow, receipts, weight recompute on hire.
+    exitGate: Every paid engagement produces a valid receipt bound to evidence.
+    schedulable: true
+  - id: P3
+    name: League and Learning
+    intent: Reputation, multi-format seasons, replay telemetry, pit-crew coaching.
+    exitGate: Season completes with reputation derived only from eligible evidence.
+    schedulable: true
+  - id: P4
+    name: Devnet Proof
+    intent: Localnet/devnet projection and the external tester evidence packet.
+    exitGate: Bounded devnet evidence accepted by lab release-readiness review.
+    schedulable: true
+  - id: P5
+    name: Real-Value Rails
+    intent: >-
+      Any mainnet rail, real custody, or real-money purse. NOT SCHEDULED.
+      Blocked pending official audit completion, findings resolution, go-live
+      readiness, and fresh explicit approval. Listed only to keep it visible.
+    exitGate: Out of scope for this programme.
+    schedulable: false
+
+swimlanes:
+  - id: SL-A
+    name: Spec and Conformance
+    charter: Keep Arena honest to canonical ADL v0.2; own the Arena profile and fixtures.
+  - id: SL-B
+    name: Arena Runtime
+    charter: Bounded match execution, fuel metering, trace emission, arena formats.
+  - id: SL-C
+    name: RAP Economy
+    charter: Discover, Decide, Prove — market, policy, escrow, receipts, reputation.
+  - id: SL-D
+    name: Player Experience
+    charter: Garage, progressive disclosure, replay telemetry, learning mode.
+  - id: SL-E
+    name: Trust, Safety and Anti-Cheat
+    charter: Declaration-behaviour binding, injection containment, abuse handling.
+  - id: SL-F
+    name: Release Ops and Evidence
+    charter: Evidence packets, tester gates, lab feedback loop, public claims discipline.
+
+epics:
+
+  # ======================= SL-A : Spec and Conformance =======================
+  - id: E01
+    swimlane: SL-A
+    phase: P0
+    name: ADL Arena Profile and Fixture Corpus
+    outcome: >-
+      A competitor bot is expressible as a schema-valid ADL v0.2 document, and a
+      corpus of valid/invalid fixtures exists that the lab can adopt.
+    issues:
+      - id: A1
+        status: done
+        completedOn: 2026-08-05
+        evidence: >-
+          tools/validate_adl.py — both reference documents 0 errors against
+          pinned schema 679a5c3e...; 15 drift corrections and 5 findings logged
+          in docs/FINDINGS.md; F-001 charge-intent gap reproduced as a
+          schema-valid negative fixture.
+        title: Validate reference ADL documents against the published v0.2 schema
+        rationale: >-
+          The reference bots were drafted from prose, not from the schema. Until
+          validated they are hypotheses, not artifacts.
+        dependsOn: []
+        boundary: Validation proves document shape only. It authorizes no execution.
+        tasks:
+          - Fetch specs/ADL-v0.2.schema.json from the published downloads or lab repo
+          - Pin schema by sha256 into the repo as a vendored fixture
+          - Run both reference ADLs through a Draft 2020-12 validator
+          - Correct every field-name and enum drift found; log each drift as a finding
+          - File drift findings upstream to the lab as implementation reports
+        acceptance:
+          - Both reference ADL documents validate with zero schema errors
+          - The pinned schema hash is recorded and checked in CI
+          - Every drift correction has a one-line changelog entry citing the schema path
+        tests: [T-001, T-002]
+      - id: A2
+        title: Build the Arena negative-fixture corpus
+        rationale: Invalid documents must fail for the stated reason, not incidentally.
+        dependsOn: [A1]
+        boundary: Fixtures are review artifacts; they do not define new ADL semantics.
+        tasks:
+          - Author >= 20 invalid fixtures, one per intended failure mode
+          - Cover bare-string instructions, missing policyRef on a risky tool, duplicate
+            tool/function IDs, sourceRef prefix mismatch, unprefixed extension namespace
+          - Assert each fixture fails with the expected diagnostic code, not merely "invalid"
+        acceptance:
+          - Every negative fixture fails validation
+          - Every negative fixture asserts a specific diagnostic, not a generic failure
+          - Zero negative fixtures pass silently
+        tests: [T-003, T-004]
+      - id: A3
+        title: Define the arena-profile extension namespace
+        rationale: >-
+          Arena needs match-specific metadata (format, class, fuel cap) without
+          polluting canonical ADL.
+        dependsOn: [A1]
+        boundary: >-
+          An x- namespace is Arena-local. It confers no canonical status and must
+          not carry payment-like semantics.
+        tasks:
+          - Specify x-arena namespace fields (format, declaredClass, fuelCap, seasonId)
+          - Assert strict validation rejects unprefixed arena keys
+          - Document the promotion path if the lab later adopts any field
+        acceptance:
+          - x-arena fields validate under strict mode
+          - An unprefixed "arena:" key fails strict validation
+          - No payment, spend, or authority semantics exist in x-arena
+        tests: [T-005, T-006]
+
+  - id: E02
+    swimlane: SL-A
+    phase: P0
+    name: Deterministic Weigh-In and Capability Hash
+    outcome: Weight class is a reproducible pure function of a validated ADL document.
+    issues:
+      - id: A4
+        title: Specify and freeze the AU weight formula v0.1
+        rationale: >-
+          If weight is not deterministic and independently recomputable, the
+          whole competitive frame collapses.
+        dependsOn: [A1]
+        boundary: A weight certificate authorizes nothing; it is an eligibility input only.
+        tasks:
+          - Publish the AU table and class bands as a versioned spec document
+          - Implement the calculator as a pure function with no IO, clock, or randomness
+          - Emit a capability hash over the canonicalised certificate
+          - Version the formula so historical certificates remain interpretable
+        acceptance:
+          - Same document yields identical AU and hash across runs, machines, and key order
+          - Certificate records weightsVersion so old results stay interpretable
+          - Reordering YAML keys does not change the hash
+        tests: [T-007, T-008, T-009]
+      - id: A5
+        title: Implement coupled weight for hired specialists
+        rationale: >-
+          The class-bump-on-hire tradeoff is the core strategic mechanic and must
+          be computed identically by every implementation.
+        dependsOn: [A4]
+        boundary: Computing coupled weight does not engage a specialist or move value.
+        tasks:
+          - Apply the coupling factor and per-engagement overhead
+          - Recompute fielded class and flag classBumped
+          - Handle transitive hires (a specialist that itself hires) with a depth cap
+        acceptance:
+          - Hiring a specialist increases fielded AU and can change fielded class
+          - A hire that would exceed the entered class is rejected at draft, not mid-match
+          - Transitive hire depth beyond the cap is refused with a stated reason
+        tests: [T-010, T-011, T-012]
+      - id: A6
+        title: Anti-gaming review of the weight formula
+        rationale: Any scoring function invites optimisation against its own artifacts.
+        dependsOn: [A4]
+        boundary: Review output is advisory to formula v0.2; it does not change v0.1 mid-season.
+        tasks:
+          - Attempt to farm the policy hygiene credit with no-op deny policies
+          - Attempt to understate contextWindow while relying on more at runtime
+          - Attempt to hide capability in skills or instructions rather than tools
+          - Produce a written exploit report with recommended v0.2 changes
+        acceptance:
+          - No-op policy padding cannot reduce AU below the declared floor
+          - Understated declarations are detectable at runtime by E13 binding
+          - Exploit report exists and is linked from the formula spec
+        tests: [T-013, T-014]
+
+  - id: E03
+    swimlane: SL-A
+    phase: P1
+    name: Conformance-to-League Mapping
+    outcome: >-
+      ADL conformance levels gate league entry, so players climb the spec ladder
+      by playing.
+    issues:
+      - id: A7
+        title: Map conformance levels to league tiers
+        rationale: >-
+          This is the teaching mechanism — players learn the spec by ranking up,
+          not by reading it.
+        dependsOn: [A1, A4]
+        boundary: >-
+          Reaching a tier grants match eligibility only. It never grants provider,
+          network, wallet, or rail access.
+        tasks:
+          - Bind five tiers: L0 garage entry, L1 Rookie, L2 Open, L3 Title, L4 Pro/Hosted
+          - Enforce that purses and hiring require L3, because L1/L2 forbid the payment extension
+          - Inspect declared rails separately: achieved L3 does not imply dry-run only (F-006)
+          - Run the conformance checker at registration and store the verdict
+          - Reject documents whose requestedLevel exceeds their achieved level
+        acceptance:
+          - A Level-1 document cannot enter a Title fight or carry a purse
+          - requestedLevel above achieved level is rejected with the failing requirement named
+          - The tier verdict is recorded in the weigh-in certificate
+        tests: [T-015, T-016]
+      - id: A8
+        title: Guard the known v0.2 charge-intent conformance gap
+        rationale: >-
+          The lab records that charge intents can escape intended Level-3
+          enforcement. Arena must not inherit that hole.
+        dependsOn: [A7]
+        boundary: >-
+          The guard is Arena-local compensating control. It does not fix the spec
+          and must not be described as fixing it.
+        tasks:
+          - Enumerate intent shapes that escape Level-3 enforcement
+          - Add an Arena-side pre-draft check refusing under-constrained charge intents
+          - File the reproduction upstream as a v0.3 candidate
+        acceptance:
+          - An under-constrained charge intent is refused at draft with a stated reason
+          - The guard is documented as compensating, not as a spec fix
+          - An upstream issue exists with a minimal reproduction
+        tests: [T-017, T-018]
+
+  # ========================== SL-B : Arena Runtime ==========================
+  - id: E04
+    swimlane: SL-B
+    phase: P1
+    name: Match Engine and Bounded Execution
+    outcome: Two ADL-defined bots run a complete match inside a fail-closed sandbox.
+    issues:
+      - id: B1
+        title: Build the bounded execution lane
+        rationale: >-
+          Execution is the one place the declaration becomes action, so it is the
+          one place fail-closed must be provably enforced.
+        dependsOn: [A1]
+        boundary: >-
+          The lane is the ONLY component permitted to execute, and only for
+          declared, policy-matched, locally-bound capabilities.
+        tasks:
+          - Implement a runtime binder that refuses any undeclared capability
+          - Default network egress to deny; require explicit allowlist entries
+          - Refuse persistent/external memory backends unless separately approved
+          - Emit a structured refusal event for every blocked attempt
+        acceptance:
+          - A tool absent from the ADL cannot be invoked
+          - A tool present but lacking a matching policyRef cannot be invoked
+          - Network egress with an empty allowlist is refused and logged
+          - Every refusal emits an event with subject, resource, action, and reason
+        tests: [T-019, T-020, T-021, T-022]
+      - id: B2
+        title: Implement the turn loop and match lifecycle
+        rationale: Deterministic lifecycle is the precondition for replayable evidence.
+        dependsOn: [B1]
+        boundary: Lifecycle events are evidence, not adjudication.
+        tasks:
+          - Define match states and legal transitions
+          - Enforce turn limits and per-turn timeouts from the declared harness
+          - Handle competitor crash, timeout, and malformed output as defined outcomes
+        acceptance:
+          - Every match terminates in a defined terminal state
+          - A crashed or hung competitor forfeits rather than hanging the match
+          - Illegal state transitions are impossible, not merely discouraged
+        tests: [T-023, T-024, T-025]
+      - id: B3
+        title: Provider abstraction across declared model providers
+        rationale: >-
+          Provider neutrality is an ADL promise; the Arena is where it either
+          holds or visibly breaks.
+        dependsOn: [B1]
+        boundary: >-
+          Declaring a provider is not credential authorization. Missing credentials
+          fail closed rather than silently falling back.
+        tasks:
+          - Honour the declared preference order without inventing fallbacks
+          - Report degraded semantics when a provider lacks a declared requirement
+          - Run the same bot across at least two providers and diff behaviour
+        acceptance:
+          - Undeclared fallbacks are never used
+          - A provider missing structuredOutput reports degraded, not silent success
+          - Cross-provider divergence is measured and published, not hidden
+        tests: [T-026, T-027, T-028]
+
+  - id: E05
+    swimlane: SL-B
+    phase: P1
+    name: Fuel Metering and Trace Emission
+    outcome: Tokens are a scarce in-match resource and every match yields a complete trace.
+    issues:
+      - id: B4
+        title: Implement token fuel accounting
+        rationale: Efficiency becomes a skill only if fuel is metered and enforced.
+        dependsOn: [B2]
+        boundary: Fuel accounting is deterministic bookkeeping, not billing.
+        tasks:
+          - Meter prompt and completion tokens per turn against the declared cap
+          - Enforce the budget-check eval gate at the declared threshold
+          - Define sputter behaviour when fuel is exhausted mid-turn
+        acceptance:
+          - Exceeding the declared fuel cap fails the budget gate
+          - Fuel exhaustion produces a defined outcome, never an exception
+          - Accounting reconciles exactly with the emitted trace
+        tests: [T-029, T-030, T-031]
+      - id: B5
+        title: Emit conformance-aligned trace events with redaction
+        rationale: The trace is the evidence substrate for receipts, learning mode, and disputes.
+        dependsOn: [B2]
+        boundary: >-
+          A trace records what happened. It does not by itself establish task
+          success or reputation eligibility.
+        tasks:
+          - Emit the declared observability event set for every match
+          - Apply declared redaction to prompt and output payloads
+          - Assert no secret, key, or canary value can reach the trace
+        acceptance:
+          - Every match emits a complete, ordered, replayable event stream
+          - Redaction rules from the ADL are applied, not defaults
+          - No credential or canary value appears anywhere in a stored trace
+        tests: [T-032, T-033, T-034]
+
+  - id: E06
+    swimlane: SL-B
+    phase: P1
+    name: Vault Arena Format
+    outcome: One complete, balanced, adjudicable arena format ships end to end.
+    issues:
+      - id: B6
+        title: Implement Vault attack/defend scoring
+        rationale: A format nobody can argue about is worth more than five ambiguous ones.
+        dependsOn: [B2, B4]
+        boundary: Scoring is deterministic given a trace; it does not judge intent.
+        tasks:
+          - Implement canary-based secret-extraction detection
+          - Score defence holds, successful extractions, and fuel efficiency
+          - Define draws, double-forfeits, and mutual-extraction tie-breaks
+        acceptance:
+          - Identical traces always produce identical scores
+          - Every terminal state has exactly one defined scoring outcome
+          - A secret leaked in any form the canary detects scores as extraction
+        tests: [T-035, T-036, T-037]
+      - id: B7
+        title: Format balance harness
+        rationale: >-
+          Without a balance harness, the first dominant strategy ends the format's
+          competitive life.
+        dependsOn: [B6]
+        boundary: Balance findings inform format v0.2; they do not retroactively alter results.
+        tasks:
+          - Run round-robin baselines across archetype bots
+          - Measure first-mover advantage and attack/defence win asymmetry
+          - Publish the balance report with the season rules
+        acceptance:
+          - Attacker/defender win split falls within the published tolerance band
+          - No single archetype exceeds the published dominance threshold
+          - The balance report is published before the season opens
+        tests: [T-038, T-039]
+
+  # =========================== SL-C : RAP Economy ===========================
+  - id: E07
+    swimlane: SL-C
+    phase: P2
+    name: Discover — Mercenary Market
+    outcome: Specialists advertise bounded capability with traceable provenance.
+    issues:
+      - id: C1
+        title: Integrate discovery-source into the specialist listing surface
+        rationale: Discovery is where players first meet RAP's "relevance is not trust" rule.
+        dependsOn: [A1, A4]
+        boundary: >-
+          A listing is a claim, not verified truth. Discovery grants no invocation
+          permission and no publication.
+        tasks:
+          - Adopt discovery-source and ranking-explainability rather than reimplementing
+          - Render the relevance_only_not_trust vocabulary directly from the package
+          - Derive listings from validated ADL, never from free-text claims
+          - Record and display the provenance of every listing
+          - Show reputation state including "insufficient evidence"
+        acceptance:
+          - A listing cannot claim a capability absent from its ADL
+          - Provenance is displayed for every listing
+          - Discovery never triggers invocation or publication as a side effect
+        tests: [T-040, T-041, T-042]
+      - id: C2
+        title: Separate publication from discovery as an explicit gate
+        rationale: The spec is emphatic that publication must never happen accidentally.
+        dependsOn: [C1]
+        boundary: Import, mapping, and export must never publish a live listing.
+        tasks:
+          - Make publication an explicit operator-approved action
+          - Assert no import/export path can publish
+          - Log every publication with approver identity
+        acceptance:
+          - No code path publishes without explicit approval
+          - Publication events record the approver
+          - Export of a listing does not publish it
+        tests: [T-043, T-044]
+
+  - id: E08
+    swimlane: SL-C
+    phase: P2
+    name: Decide — Buyer Policy and the Draft Broker
+    outcome: >-
+      Hiring is a bounded policy decision under budget, trust, and authority
+      constraints, resolved before the match starts.
+    issues:
+      - id: C3
+        title: Integrate buyer-authority-policy as the hire decision engine
+        rationale: >-
+          Decide is the layer players most often skip conceptually, so the game
+          must make it unavoidable and visible.
+        dependsOn: [C1, A5]
+        boundary: >-
+          An allow decision permits a bounded engagement only. It never widens
+          buyer authority beyond the operator-declared envelope.
+        tasks:
+          - Adopt buyer-authority-policy from @reddi/agent-protocol as the decision core
+          - Evaluate trust class, budget ceiling, rail, and approval posture
+          - Emit a machine-readable decision with reason codes for allow and deny
+          - Assert an external mandate can narrow but never widen local authority
+        acceptance:
+          - Every hire attempt yields a recorded decision with reason codes
+          - A mandate attempting to widen local authority is rejected
+          - Exceeding the declared purse budget denies the hire
+        tests: [T-045, T-046, T-047]
+      - id: C4
+        title: Implement the draft window and weigh-in recomputation
+        rationale: >-
+          The hire-versus-class tradeoff is the strategic heart of the game and
+          must resolve deterministically before combat.
+        dependsOn: [C3, A5]
+        boundary: Draft outcomes bind eligibility only; no work or payment occurs at draft.
+        tasks:
+          - Open a bounded draft window with a hard close
+          - Recompute fielded weight on every hire and re-check class eligibility
+          - Refuse hires that would breach the entered class, with the AU delta shown
+        acceptance:
+          - Fielded weight is recomputed and shown before the hire is committed
+          - A class-breaching hire is refused before the match, never mid-match
+          - The draft window closes deterministically and cannot be reopened
+        tests: [T-048, T-049, T-050]
+
+  - id: E09
+    swimlane: SL-C
+    phase: P2
+    name: Prove — Escrow, Receipts and Attestation
+    outcome: >-
+      Purse and fees move only on the allowed success path, and every movement is
+      bound to evidence.
+    issues:
+      - id: C5
+        title: Implement dry-run escrow for purse and fees
+        rationale: >-
+          The purse teaches the single most important RAP lesson: payment success
+          is not work success.
+        dependsOn: [C3]
+        boundary: >-
+          Rail is pinned to x402-dry-run. livePaymentAccess is false. No wallet,
+          facilitator, custody, or real value exists anywhere in this issue.
+        tasks:
+          - Lock both purses and any hire fees at match start
+          - Release only on completion.status=pass with required gates passed
+          - Implement refund, timeout, and dispute paths
+          - Assert no live rail can be selected even if declared
+        acceptance:
+          - Transport success alone never releases escrow
+          - A failed required gate routes to refund or dispute, never payout
+          - Selecting any non-dry-run rail is refused
+          - Escrow accounting balances to zero across every terminal state
+        tests: [T-051, T-052, T-053, T-054]
+      - id: C6
+        title: Integrate receipts and receipt-evidence-binding per match and engagement
+        rationale: The receipt is the artifact an external analyst can actually check.
+        dependsOn: [C5, B5]
+        boundary: >-
+          A receipt records that policy, payment reference, and evidence reference
+          existed. It does not prove settlement finality or provider quality.
+        tasks:
+          - Adopt receipts and receipt-evidence-binding rather than reimplementing
+          - Populate the full v1 envelope including request/response hashes
+          - Bind evidenceRef to the stored match trace
+          - Fail closed on missing proof refs, malformed fields, or credential leakage
+        acceptance:
+          - Every completed match and engagement emits a schema-valid receipt
+          - A receipt with a missing paymentProofRef fails validation
+          - No receipt ever contains credential material
+          - evidenceRef resolves to a retrievable trace
+        tests: [T-055, T-056, T-057, T-058]
+      - id: C7
+        title: Integrate attestation-reputation as the judge actor
+        rationale: RAP already names a paid judge actor; the arena referee is that actor.
+        dependsOn: [C6]
+        boundary: >-
+          An attestation is one evidence input. It cannot substitute for required
+          eval gates or for payment proof.
+        tasks:
+          - Adopt attestation-reputation and hosted-attestation-claim from the package
+          - Define the judge as an ADL-declared agent with its own eval gates
+          - Record attestation state on every receipt
+          - Detect and handle judge unavailability and judge disagreement
+        acceptance:
+          - Attestation state is present on every receipt
+          - A failed attestation blocks payout even when transport succeeded
+          - Judge unavailability produces a defined outcome, not an indefinite hang
+        tests: [T-059, T-060, T-061]
+
+  - id: E10
+    swimlane: SL-C
+    phase: P3
+    name: Reputation — Commit-Reveal League Table
+    outcome: Standing derives only from verified work, never from listings or payment alone.
+    issues:
+      - id: C8
+        title: Integrate offchain-reputation-preview and enforce eligibility rules
+        rationale: >-
+          The spec is explicit that reputation must not mutate when policy failed
+          or evidence is missing. This is the cleanest thing an analyst can audit.
+        dependsOn: [C6, C7]
+        boundary: >-
+          Reputation is a derived signal within one season. It is not portable
+          identity and carries no external warranty.
+        tasks:
+          - Adopt offchain-reputation-preview as the eligibility evaluator
+          - Gate mutation on policy pass, evidence present, attestation pass, payment proof verified
+          - Assert every ineligible path leaves standing unchanged
+          - Expose the eligibility verdict alongside every rating change
+        acceptance:
+          - A match failing policy produces zero reputation change
+          - A match with a missing evidence ref produces zero reputation change
+          - Every rating change is traceable to a specific eligible receipt
+        tests: [T-062, T-063, T-064]
+      - id: C9
+        title: Implement commit-reveal scoring
+        rationale: >-
+          Rivals scoring rivals invites retaliation and copying; commit-reveal is
+          the spec's answer and the arena is a natural stress test.
+        dependsOn: [C8]
+        boundary: Off-chain commit-reveal only in P3. On-chain projection is E15.
+        tasks:
+          - Commit score hashes before any reveal
+          - Enforce the reveal deadline and penalise non-reveal
+          - Detect copied scores and late-reveal advantage
+        acceptance:
+          - No score is visible before the reveal window opens
+          - A non-revealed commit is penalised per published rule
+          - A reveal not matching its commit hash is rejected
+        tests: [T-065, T-066, T-067]
+
+  # ======================== SL-D : Player Experience ========================
+  - id: E11
+    swimlane: SL-D
+    phase: P2
+    name: Garage and Progressive Disclosure
+    outcome: >-
+      A newcomer assembles a valid bot without reading the spec; an expert hand-
+      writes ADL. Both produce the same artifact.
+    issues:
+      - id: D1
+        title: Build the visual garage that emits ADL
+        rationale: >-
+          The garage is the on-ramp; if it emits anything other than canonical
+          ADL, the whole proof is undermined.
+        dependsOn: [A1, A4]
+        boundary: The garage authors documents. It never executes or publishes them.
+        tasks:
+          - Emit schema-valid ADL from every UI state
+          - Show live AU weight and class as the player builds
+          - Surface validation errors in plain language with a spec link
+        acceptance:
+          - Every reachable garage state emits a schema-valid document
+          - Weight updates live and matches the CLI calculator exactly
+          - Errors name the offending field and link to the governing spec section
+        tests: [T-068, T-069, T-070]
+      - id: D2
+        title: Round-trip fidelity between visual and raw editing
+        rationale: >-
+          Experts will not adopt a tool that mangles their handwritten documents.
+        dependsOn: [D1]
+        boundary: Round-tripping preserves semantics; it does not validate intent.
+        tasks:
+          - Import a handwritten ADL into the visual editor without semantic loss
+          - Export and diff to confirm no silent field drops
+          - Report unsupported-in-UI semantics explicitly rather than discarding
+        acceptance:
+          - Import then export is semantically lossless
+          - Any UI-unsupported field is reported, never silently dropped
+          - Comments and ordering loss is disclosed to the player
+        tests: [T-071, T-072]
+
+  - id: E12
+    swimlane: SL-D
+    phase: P3
+    name: Learning Mode — Replay Telemetry and Pit Crew
+    outcome: Losing a match reliably teaches the player something specific and actionable.
+    issues:
+      - id: D3
+        title: Render the annotated match replay
+        rationale: >-
+          The replay is where a receipt and a trace become a learning experience
+          instead of a compliance artifact.
+        dependsOn: [B5, B6]
+        boundary: >-
+          The replay renders recorded evidence. It never reconstructs, infers, or
+          embellishes what was not traced.
+        tasks:
+          - Render turn-by-turn fuel burn, tool calls, and gate outcomes
+          - Highlight the decisive moment that determined the result
+          - Show the opponent's approach only within the season's disclosure rules
+        acceptance:
+          - Every rendered claim maps to a specific trace event
+          - No replay statement is unsupported by evidence
+          - Disclosure rules are enforced per season configuration
+        tests: [T-073, T-074]
+      - id: D4
+        title: Build the pit-crew coach
+        rationale: One concrete fix per loss is the difference between churn and mastery.
+        dependsOn: [D3]
+        boundary: >-
+          Coaching is advisory. It never edits a player's bot and never guarantees
+          an outcome.
+        tasks:
+          - Derive a single highest-leverage suggestion from the failure mode
+          - Cite the governing spec section for each suggestion
+          - Suppress coaching when evidence is insufficient rather than guessing
+        acceptance:
+          - Each loss yields at most one concrete, evidence-grounded suggestion
+          - Every suggestion cites a spec section or a trace event
+          - Insufficient evidence produces an honest "cannot determine" message
+        tests: [T-075, T-076]
+
+  # =================== SL-E : Trust, Safety and Anti-Cheat ==================
+  - id: E13
+    swimlane: SL-E
+    phase: P1
+    name: Declaration-Behaviour Binding
+    outcome: A bot cannot do at runtime what its ADL did not declare.
+    issues:
+      - id: E1I
+        title: Enforce runtime binding against the weighed declaration
+        rationale: >-
+          This single control is what makes weight class meaningful and makes ADL
+          a contract rather than documentation.
+        dependsOn: [B1, A4]
+        boundary: >-
+          Binding enforces the declaration. It does not evaluate whether the
+          declaration was wise.
+        tasks:
+          - Bind the runtime to the exact capability hash weighed in
+          - Refuse any capability outside the bound declaration
+          - Forfeit the match on an attempted escape and record the evidence
+        acceptance:
+          - A capability absent from the weighed hash cannot execute
+          - An escape attempt forfeits the match with recorded evidence
+          - The bound hash on the trace matches the weigh-in certificate exactly
+        tests: [T-077, T-078, T-079]
+      - id: E2I
+        title: Detect undeclared-capability reliance
+        rationale: >-
+          The subtler cheat is not declaring a tool but relying on capacity beyond
+          the declared envelope.
+        dependsOn: [E1I, B4]
+        boundary: Detection flags a discrepancy; adjudication is a separate human-reviewed step.
+        tasks:
+          - Compare actual context and output usage against declared requirements
+          - Flag sustained overrun beyond the published tolerance
+          - Route flagged matches to review rather than auto-banning
+        acceptance:
+          - Declared-versus-actual usage is measured on every match
+          - Sustained overrun is flagged with the measured delta
+          - No automatic ban occurs without human review
+        tests: [T-080, T-081]
+
+  - id: E14
+    swimlane: SL-E
+    phase: P2
+    name: Injection Containment and Arena Safety
+    outcome: >-
+      Adversarial content between competitors stays inside the match and cannot
+      reach the platform, the judge, or another player.
+    issues:
+      - id: E3I
+        title: Contain cross-competitor prompt injection
+        rationale: >-
+          The Vault format deliberately makes injection a legitimate move, which
+          makes containment non-negotiable rather than optional.
+        dependsOn: [B1, B6]
+        boundary: >-
+          Containment protects the platform and third parties. It does not protect
+          a competitor from a fair in-match attack.
+        tasks:
+          - Treat all opponent output as untrusted, never as instruction
+          - Assert opponent content cannot alter judge, broker, or platform behaviour
+          - Fuzz the transport with hostile payloads including protocol-shaped strings
+        acceptance:
+          - Opponent content never reaches an approved-source path
+          - No opponent payload can alter judge or broker behaviour
+          - Hostile payload fuzzing produces zero platform-level escapes
+        tests: [T-082, T-083, T-084]
+      - id: E4I
+        title: Abuse, harm and content handling for player-authored bots
+        rationale: >-
+          Player-authored agents are user-generated content and will eventually
+          include harmful material.
+        dependsOn: [E3I]
+        boundary: >-
+          Moderation covers Arena-hosted play. It makes no claim about what players
+          run privately.
+        tasks:
+          - Define prohibited bot behaviours and publish them before the season
+          - Implement report, review, and appeal paths
+          - Ensure moderation actions are logged and reversible
+        acceptance:
+          - Prohibited-behaviour policy is published before the first season
+          - Every moderation action is logged with reviewer and reason
+          - An appeal path exists and is documented
+        tests: [T-085, T-086]
+
+  # ==================== SL-F : Release Ops and Evidence =====================
+  - id: E15
+    swimlane: SL-F
+    phase: P4
+    name: Devnet Projection and External Tester Packet
+    outcome: >-
+      Arena play generates the bounded devnet evidence the protocol repo still
+      owes on the release ladder.
+    issues:
+      - id: F1
+        title: Project eligible match results to localnet then devnet
+        rationale: >-
+          Real players generating real evidence is a better tester gate than
+          recruiting people to run conformance suites.
+        dependsOn: [C6, C9]
+        boundary: >-
+          Devnet proof is not mainnet readiness. Rich metadata stays off-chain;
+          only hashes and references project.
+        tasks:
+          - Rehearse on localnet before any devnet write
+          - Project only hashes and references, never rich metadata
+          - Reconcile on-chain projections against off-chain receipts
+        acceptance:
+          - Localnet rehearsal passes before devnet is touched
+          - No personal or rich metadata appears on chain
+          - Every projection reconciles to exactly one off-chain receipt
+        tests: [T-087, T-088, T-089]
+      - id: F2
+        title: Assemble the external tester evidence packet
+        rationale: This is the concrete artifact the release ladder is waiting on.
+        dependsOn: [F1]
+        boundary: >-
+          The packet is evidence for review. It is not audit completion and must
+          never be described as such.
+        tasks:
+          - Bundle traces, receipts, policy decisions, and reconciliation reports
+          - State explicitly what the packet does not prove
+          - Include the negative results and the failures, not only the successes
+        acceptance:
+          - The packet includes a written non-claims section
+          - Failed and anomalous matches are included, not filtered out
+          - Every claim in the packet cites a specific artifact
+        tests: [T-090, T-091]
+
+  - id: E16
+    swimlane: SL-F
+    phase: P0
+    name: Lab Feedback Loop and Claims Discipline
+    outcome: >-
+      Arena findings reach the lab as evidence, and no Arena surface overstates
+      maturity.
+    issues:
+      - id: F3
+        title: Establish the one-way canonicality workflow
+        rationale: >-
+          The binding rule is that spec flows down and findings flow up. A proof
+          project is exactly where that discipline erodes first.
+        dependsOn: [A1]
+        boundary: >-
+          Arena may propose. Only the lab may make an ADL semantic canonical.
+        tasks:
+          - Route every finding through the public feedback intake
+          - Forbid Arena-local ADL forks in CI
+          - Track which findings the lab accepted, rejected, or deferred
+        acceptance:
+          - CI fails if a vendored ADL schema diverges from the pinned upstream hash
+          - Every finding has an upstream reference and a disposition
+          - No Arena document redefines an ADL semantic
+        tests: [T-092, T-093]
+      - id: F4
+        title: Enforce claims discipline across all public Arena surfaces
+        rationale: >-
+          The 2026-08-01 operational correction exists because planning was being
+          reported as implementation. A public game multiplies that risk.
+        dependsOn: [F3]
+        boundary: >-
+          This issue governs what Arena says about itself. It creates no technical
+          capability.
+        tasks:
+          - Ban the words implying audit, mainnet, or production readiness in copy
+          - Require every capability claim to cite a passing test or artifact
+          - Add a release-state banner reflecting actual gate status
+        acceptance:
+          - No public surface claims audit completion or mainnet readiness
+          - Every capability claim links to a passing test or a published artifact
+          - A closed planning issue is never rendered as a shipped capability
+        tests: [T-094, T-095]
+
+tests:
+  - { id: T-001, type: contract, automation: "pytest + jsonschema", asserts: "Both reference ADLs validate against the pinned v0.2 schema with zero errors", provesDoneFor: [A1] }
+  - { id: T-002, type: determinism, automation: "CI hash check", asserts: "Vendored schema sha256 matches the pinned upstream value; CI fails on drift", provesDoneFor: [A1, F3] }
+  - { id: T-003, type: contract, automation: "pytest parametrized over fixtures", asserts: "Every negative fixture fails validation", provesDoneFor: [A2] }
+  - { id: T-004, type: contract, automation: "pytest", asserts: "Each negative fixture produces its expected diagnostic code, not a generic error", provesDoneFor: [A2] }
+  - { id: T-005, type: contract, automation: "pytest", asserts: "x-arena namespaced fields pass strict validation", provesDoneFor: [A3] }
+  - { id: T-006, type: adversarial, automation: "pytest", asserts: "Unprefixed arena keys and payment-like semantics under x-arena are rejected", provesDoneFor: [A3] }
+  - { id: T-007, type: determinism, automation: "pytest, 1000 iterations", asserts: "Identical AU and capability hash across repeated runs", provesDoneFor: [A4] }
+  - { id: T-008, type: property, automation: "hypothesis", asserts: "YAML key reordering and whitespace changes never alter the capability hash", provesDoneFor: [A4] }
+  - { id: T-009, type: unit, automation: "pytest golden files", asserts: "Reference bot weighs exactly 62 AU; mercenary exactly 91 AU", provesDoneFor: [A4] }
+  - { id: T-010, type: unit, automation: "pytest", asserts: "Hiring the reference mercenary moves the reference bot 62 to 127 AU, Antweight to Beetleweight", provesDoneFor: [A5] }
+  - { id: T-011, type: integration, automation: "pytest", asserts: "A hire breaching the entered class is refused at draft with the AU delta stated", provesDoneFor: [A5, C4] }
+  - { id: T-012, type: property, automation: "hypothesis", asserts: "Transitive hire depth beyond the cap is refused; no unbounded recursion", provesDoneFor: [A5] }
+  - { id: T-013, type: adversarial, automation: "pytest exploit suite", asserts: "No-op deny-policy padding cannot push AU below the declared floor", provesDoneFor: [A6] }
+  - { id: T-014, type: adversarial, automation: "pytest exploit suite", asserts: "Capability hidden in skills or instructions still fails runtime binding", provesDoneFor: [A6, E1I] }
+  - { id: T-015, type: contract, automation: "pytest", asserts: "A Level-1 document is refused entry to a Title fight", provesDoneFor: [A7] }
+  - { id: T-016, type: contract, automation: "pytest", asserts: "requestedLevel above achieved level is rejected naming the failing requirement", provesDoneFor: [A7] }
+  - { id: T-017, type: adversarial, automation: "pytest", asserts: "An under-constrained charge intent is refused at pre-draft check", provesDoneFor: [A8] }
+  - { id: T-018, type: contract, automation: "doc lint", asserts: "The charge-intent guard is documented as compensating, never as a spec fix", provesDoneFor: [A8, F4] }
+  - { id: T-019, type: adversarial, automation: "pytest sandbox suite", asserts: "An undeclared tool cannot be invoked at runtime", provesDoneFor: [B1] }
+  - { id: T-020, type: adversarial, automation: "pytest sandbox suite", asserts: "A declared tool lacking a matching policyRef cannot be invoked", provesDoneFor: [B1] }
+  - { id: T-021, type: integration, automation: "network-isolated CI job", asserts: "Egress with an empty allowlist is refused and logged", provesDoneFor: [B1] }
+  - { id: T-022, type: contract, automation: "pytest", asserts: "Every refusal emits an event carrying subject, resource, action and reason", provesDoneFor: [B1] }
+  - { id: T-023, type: property, automation: "hypothesis state machine", asserts: "Every match reaches exactly one defined terminal state", provesDoneFor: [B2] }
+  - { id: T-024, type: integration, automation: "pytest with fault injection", asserts: "Crashed or hung competitors forfeit without hanging the match", provesDoneFor: [B2] }
+  - { id: T-025, type: property, automation: "hypothesis state machine", asserts: "Illegal lifecycle transitions are unreachable", provesDoneFor: [B2] }
+  - { id: T-026, type: contract, automation: "pytest with provider mocks", asserts: "Undeclared fallback providers are never selected", provesDoneFor: [B3] }
+  - { id: T-027, type: contract, automation: "pytest with provider mocks", asserts: "A provider missing a declared requirement reports degraded rather than succeeding silently", provesDoneFor: [B3] }
+  - { id: T-028, type: e2e, automation: "nightly cross-provider job", asserts: "Cross-provider behavioural divergence is measured and published", provesDoneFor: [B3] }
+  - { id: T-029, type: unit, automation: "pytest", asserts: "Exceeding the declared fuel cap fails the budget-check gate", provesDoneFor: [B4] }
+  - { id: T-030, type: integration, automation: "pytest", asserts: "Fuel exhaustion mid-turn produces the defined sputter outcome, never an exception", provesDoneFor: [B4] }
+  - { id: T-031, type: property, automation: "hypothesis", asserts: "Fuel accounting reconciles exactly with the emitted trace for every match", provesDoneFor: [B4] }
+  - { id: T-032, type: contract, automation: "pytest", asserts: "Every match emits a complete ordered replayable event stream", provesDoneFor: [B5] }
+  - { id: T-033, type: contract, automation: "pytest", asserts: "ADL-declared redaction rules are applied rather than engine defaults", provesDoneFor: [B5] }
+  - { id: T-034, type: adversarial, automation: "secret-scanner over stored traces", asserts: "No credential or canary value appears in any stored trace", provesDoneFor: [B5, E3I] }
+  - { id: T-035, type: determinism, automation: "pytest golden traces", asserts: "Identical traces always produce identical scores", provesDoneFor: [B6] }
+  - { id: T-036, type: property, automation: "hypothesis", asserts: "Every terminal state maps to exactly one scoring outcome", provesDoneFor: [B6] }
+  - { id: T-037, type: adversarial, automation: "pytest canary suite", asserts: "Secret leakage in encoded, partial, or paraphrased form still scores as extraction", provesDoneFor: [B6] }
+  - { id: T-038, type: e2e, automation: "nightly round-robin simulation", asserts: "Attacker/defender win split stays inside the published tolerance band", provesDoneFor: [B7] }
+  - { id: T-039, type: e2e, automation: "nightly round-robin simulation", asserts: "No archetype exceeds the published dominance threshold", provesDoneFor: [B7] }
+  - { id: T-040, type: contract, automation: "pytest", asserts: "A listing cannot advertise a capability absent from its ADL", provesDoneFor: [C1] }
+  - { id: T-041, type: contract, automation: "pytest", asserts: "Provenance is present and displayed for every listing", provesDoneFor: [C1] }
+  - { id: T-042, type: adversarial, automation: "pytest", asserts: "No discovery call triggers invocation or publication as a side effect", provesDoneFor: [C1, C2] }
+  - { id: T-043, type: adversarial, automation: "pytest", asserts: "No import, mapping, or export path can publish a live listing", provesDoneFor: [C2] }
+  - { id: T-044, type: contract, automation: "pytest", asserts: "Every publication event records an explicit approver identity", provesDoneFor: [C2] }
+  - { id: T-045, type: contract, automation: "pytest", asserts: "Every hire attempt produces a machine-readable decision with reason codes", provesDoneFor: [C3] }
+  - { id: T-046, type: adversarial, automation: "pytest", asserts: "An external mandate attempting to widen local buyer authority is rejected", provesDoneFor: [C3] }
+  - { id: T-047, type: unit, automation: "pytest", asserts: "A hire exceeding the declared purse budget is denied", provesDoneFor: [C3] }
+  - { id: T-048, type: integration, automation: "pytest", asserts: "Fielded weight is recomputed and surfaced before a hire commits", provesDoneFor: [C4] }
+  - { id: T-049, type: property, automation: "hypothesis", asserts: "No hire can take effect after the draft window closes", provesDoneFor: [C4] }
+  - { id: T-050, type: adversarial, automation: "pytest", asserts: "The draft window cannot be reopened by any request path", provesDoneFor: [C4] }
+  - { id: T-051, type: contract, automation: "pytest", asserts: "Transport success alone never releases escrow", provesDoneFor: [C5] }
+  - { id: T-052, type: contract, automation: "pytest", asserts: "A failed required gate routes to refund or dispute, never to payout", provesDoneFor: [C5] }
+  - { id: T-053, type: adversarial, automation: "pytest", asserts: "Selecting any rail other than x402-dry-run is refused", provesDoneFor: [C5] }
+  - { id: T-054, type: property, automation: "hypothesis", asserts: "Escrow accounting balances to zero across every terminal state", provesDoneFor: [C5] }
+  - { id: T-055, type: contract, automation: "pytest + receipt schema", asserts: "Every completed match and engagement emits a schema-valid reddi.receipt.v1", provesDoneFor: [C6] }
+  - { id: T-056, type: contract, automation: "pytest", asserts: "A receipt missing paymentProofRef fails validation closed", provesDoneFor: [C6] }
+  - { id: T-057, type: adversarial, automation: "secret scanner over receipts", asserts: "No receipt contains credential or wallet material", provesDoneFor: [C6] }
+  - { id: T-058, type: integration, automation: "pytest", asserts: "evidenceRef on every receipt resolves to a retrievable trace", provesDoneFor: [C6] }
+  - { id: T-059, type: contract, automation: "pytest", asserts: "Attestation state is present on every emitted receipt", provesDoneFor: [C7] }
+  - { id: T-060, type: contract, automation: "pytest", asserts: "A failed attestation blocks payout even when transport succeeded", provesDoneFor: [C7] }
+  - { id: T-061, type: integration, automation: "pytest with fault injection", asserts: "Judge unavailability produces a defined outcome without indefinite hang", provesDoneFor: [C7] }
+  - { id: T-062, type: contract, automation: "pytest", asserts: "A match failing policy produces zero reputation change", provesDoneFor: [C8] }
+  - { id: T-063, type: contract, automation: "pytest", asserts: "A match with a missing evidence reference produces zero reputation change", provesDoneFor: [C8] }
+  - { id: T-064, type: integration, automation: "pytest", asserts: "Every rating change traces to exactly one eligible receipt", provesDoneFor: [C8] }
+  - { id: T-065, type: adversarial, automation: "pytest", asserts: "No score is readable before the reveal window opens", provesDoneFor: [C9] }
+  - { id: T-066, type: contract, automation: "pytest", asserts: "A non-revealed commit is penalised per the published rule", provesDoneFor: [C9] }
+  - { id: T-067, type: contract, automation: "pytest", asserts: "A reveal not matching its commit hash is rejected", provesDoneFor: [C9] }
+  - { id: T-068, type: property, automation: "hypothesis over UI state space", asserts: "Every reachable garage state emits a schema-valid ADL document", provesDoneFor: [D1] }
+  - { id: T-069, type: integration, automation: "pytest comparing UI and CLI", asserts: "Garage-displayed AU matches the CLI calculator exactly", provesDoneFor: [D1] }
+  - { id: T-070, type: contract, automation: "pytest", asserts: "Validation errors name the offending field and link a spec section", provesDoneFor: [D1] }
+  - { id: T-071, type: property, automation: "hypothesis round-trip", asserts: "Import then export is semantically lossless", provesDoneFor: [D2] }
+  - { id: T-072, type: contract, automation: "pytest", asserts: "UI-unsupported fields are reported explicitly, never silently dropped", provesDoneFor: [D2] }
+  - { id: T-073, type: contract, automation: "pytest", asserts: "Every rendered replay claim maps to a specific trace event", provesDoneFor: [D3] }
+  - { id: T-074, type: contract, automation: "pytest", asserts: "Season disclosure rules are enforced in the replay renderer", provesDoneFor: [D3] }
+  - { id: T-075, type: contract, automation: "pytest over labelled failure corpus", asserts: "Each loss yields at most one concrete evidence-grounded suggestion", provesDoneFor: [D4] }
+  - { id: T-076, type: contract, automation: "pytest", asserts: "Insufficient evidence yields an honest cannot-determine message, not a guess", provesDoneFor: [D4] }
+  - { id: T-077, type: adversarial, automation: "pytest binding suite", asserts: "A capability absent from the weighed hash cannot execute", provesDoneFor: [E1I] }
+  - { id: T-078, type: integration, automation: "pytest", asserts: "An escape attempt forfeits the match and records evidence", provesDoneFor: [E1I] }
+  - { id: T-079, type: determinism, automation: "pytest", asserts: "The bound hash on every trace matches its weigh-in certificate", provesDoneFor: [E1I] }
+  - { id: T-080, type: integration, automation: "nightly telemetry job", asserts: "Declared-versus-actual usage is measured on every match", provesDoneFor: [E2I] }
+  - { id: T-081, type: contract, automation: "pytest", asserts: "Sustained overrun is flagged with the measured delta and routed to review, not auto-ban", provesDoneFor: [E2I] }
+  - { id: T-082, type: adversarial, automation: "pytest injection corpus", asserts: "Opponent content never reaches an approved-source path", provesDoneFor: [E3I] }
+  - { id: T-083, type: adversarial, automation: "pytest injection corpus", asserts: "No opponent payload alters judge or broker behaviour", provesDoneFor: [E3I] }
+  - { id: T-084, type: adversarial, automation: "fuzzing job", asserts: "Hostile and protocol-shaped payloads produce zero platform-level escapes", provesDoneFor: [E3I] }
+  - { id: T-085, type: contract, automation: "doc lint + CI gate", asserts: "Prohibited-behaviour policy is published before season open", provesDoneFor: [E4I] }
+  - { id: T-086, type: contract, automation: "pytest", asserts: "Every moderation action is logged with reviewer and reason and is reversible", provesDoneFor: [E4I] }
+  - { id: T-087, type: integration, automation: "localnet CI job", asserts: "Localnet rehearsal passes before any devnet write is attempted", provesDoneFor: [F1] }
+  - { id: T-088, type: adversarial, automation: "chain-payload scanner", asserts: "No rich or personal metadata is written on chain; hashes and refs only", provesDoneFor: [F1] }
+  - { id: T-089, type: integration, automation: "reconciliation job", asserts: "Every on-chain projection reconciles to exactly one off-chain receipt", provesDoneFor: [F1] }
+  - { id: T-090, type: contract, automation: "doc lint", asserts: "The tester packet contains an explicit non-claims section", provesDoneFor: [F2] }
+  - { id: T-091, type: contract, automation: "packet build job", asserts: "Failed and anomalous matches are included in the packet, not filtered", provesDoneFor: [F2] }
+  - { id: T-092, type: determinism, automation: "CI gate", asserts: "CI fails if the vendored ADL schema diverges from the pinned upstream hash", provesDoneFor: [F3] }
+  - { id: T-093, type: contract, automation: "repo lint", asserts: "No Arena document redefines an ADL semantic; every finding has an upstream reference", provesDoneFor: [F3] }
+  - { id: T-094, type: contract, automation: "copy lint over public surfaces", asserts: "No public surface claims audit completion, mainnet readiness, or production status", provesDoneFor: [F4] }
+  - { id: T-095, type: contract, automation: "copy lint", asserts: "Every capability claim links to a passing test or published artifact", provesDoneFor: [F4] }

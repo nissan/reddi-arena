@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reddi Arena — weigh in. power up. fight.</title>
+<style>
+  /* ---- tokens: industrial fight-card ---------------------------------
+     steel      #14161a  base
+     plate      #1c1f26  raised
+     seam       #2b2f38  hairline
+     amber      #f5a524  hazard accent (single boldness)
+     amber-dim  #b9791a
+     bone       #e8e6df  primary text
+     ash        #8a8f9a  muted
+     red        #e5484d  loss / extraction
+     green      #46a758  win / hold
+     ------------------------------------------------------------------- */
+  :root{
+    --steel:#14161a; --plate:#1c1f26; --seam:#2b2f38; --amber:#f5a524;
+    --amber-dim:#b9791a; --bone:#e8e6df; --ash:#8a8f9a; --red:#e5484d; --green:#46a758;
+    --mono:"DM Mono",ui-monospace,"SF Mono",Menlo,monospace;
+    --disp:"Oswald","Arial Narrow",sans-serif;
+    --body:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+  }
+  @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@400;600;700&family=DM+Mono:wght@400;500&display=swap');
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto} *{animation:none!important;transition:none!important}}
+  body{margin:0;background:var(--steel);color:var(--bone);font-family:var(--body);
+    line-height:1.5;-webkit-font-smoothing:antialiased}
+  a{color:var(--amber)}
+  .wrap{max-width:1080px;margin:0 auto;padding:0 20px}
+
+  /* header */
+  header{border-bottom:2px solid var(--seam);background:
+    repeating-linear-gradient(45deg,#14161a,#14161a 12px,#161920 12px,#161920 24px)}
+  .head{display:flex;align-items:baseline;gap:16px;padding:22px 20px;max-width:1080px;margin:0 auto;flex-wrap:wrap}
+  .logo{font-family:var(--disp);font-weight:700;font-size:30px;letter-spacing:.06em;
+    text-transform:uppercase;color:var(--bone)}
+  .logo b{color:var(--amber)}
+  .tag{font-family:var(--mono);font-size:12px;color:var(--ash);letter-spacing:.02em}
+  .rail-badge{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--amber-dim);
+    border:1px solid var(--seam);padding:5px 9px;border-radius:2px}
+
+  /* hero */
+  .hero{padding:44px 0 26px;border-bottom:1px solid var(--seam)}
+  .hero h1{font-family:var(--disp);font-weight:700;font-size:clamp(34px,6vw,60px);
+    text-transform:uppercase;letter-spacing:.02em;margin:0 0 10px;line-height:.98}
+  .hero h1 span{color:var(--amber)}
+  .hero p{max-width:620px;color:var(--ash);margin:0 0 22px;font-size:16px}
+  .steps{display:flex;gap:8px;flex-wrap:wrap;font-family:var(--mono);font-size:12px;color:var(--ash)}
+  .steps b{color:var(--bone)}
+
+  /* nav tabs */
+  nav.tabs{position:sticky;top:0;z-index:20;background:var(--steel);border-bottom:1px solid var(--seam)}
+  .tabrow{display:flex;gap:0;max-width:1080px;margin:0 auto;padding:0 20px}
+  .tab{font-family:var(--disp);text-transform:uppercase;letter-spacing:.05em;font-size:15px;
+    padding:14px 18px;color:var(--ash);background:none;border:none;border-bottom:2px solid transparent;
+    cursor:pointer}
+  .tab[aria-selected="true"]{color:var(--amber);border-bottom-color:var(--amber)}
+  .tab:focus-visible{outline:2px solid var(--amber);outline-offset:-2px}
+
+  section.panel{display:none;padding:30px 0 60px}
+  section.panel.active{display:block}
+
+  h2.sec{font-family:var(--disp);text-transform:uppercase;letter-spacing:.04em;font-weight:600;
+    font-size:13px;color:var(--ash);margin:0 0 14px;padding-bottom:8px;border-bottom:1px solid var(--seam)}
+
+  /* cards grid */
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}
+  .card{background:var(--plate);border:1px solid var(--seam);border-radius:3px;padding:16px;
+    position:relative}
+  .card.pick{border-color:var(--amber)}
+  .card h3{font-family:var(--disp);text-transform:uppercase;letter-spacing:.02em;font-weight:600;
+    font-size:18px;margin:0 0 4px}
+  .card .desc{font-size:13px;color:var(--ash);margin:0 0 12px;min-height:38px}
+  .stat{display:flex;justify-content:space-between;font-family:var(--mono);font-size:12px;
+    padding:3px 0;color:var(--ash)}
+  .stat b{color:var(--bone)}
+  .chip{display:inline-block;font-family:var(--mono);font-size:10px;text-transform:uppercase;
+    letter-spacing:.06em;padding:2px 7px;border:1px solid var(--seam);border-radius:2px;color:var(--ash)}
+  .chip.amber{color:var(--amber);border-color:var(--amber-dim)}
+  .chip.grant{color:var(--green);border-color:#2f5133}
+
+  button.act{font-family:var(--disp);text-transform:uppercase;letter-spacing:.04em;font-weight:600;
+    font-size:13px;background:var(--amber);color:#1a1206;border:none;padding:9px 14px;border-radius:2px;
+    cursor:pointer;margin-top:10px}
+  button.act.ghost{background:none;color:var(--amber);border:1px solid var(--amber-dim)}
+  button.act:focus-visible{outline:2px solid var(--bone);outline-offset:2px}
+  button.act[disabled]{opacity:.4;cursor:not-allowed}
+
+  /* the signature: weigh-in scale */
+  .scale{background:#0f1114;border:1px solid var(--seam);border-radius:3px;padding:18px;margin-bottom:16px}
+  .scale .readout{font-family:var(--disp);font-weight:700;font-size:52px;color:var(--amber);
+    line-height:1;letter-spacing:.02em;font-variant-numeric:tabular-nums}
+  .scale .unit{font-family:var(--mono);font-size:12px;color:var(--ash);margin-left:8px}
+  .scale .classline{font-family:var(--mono);font-size:13px;color:var(--bone);margin-top:6px}
+  .scale .bump{color:var(--amber)}
+  .track{height:10px;background:#0a0b0d;border:1px solid var(--seam);border-radius:2px;margin-top:12px;
+    position:relative;overflow:hidden}
+  .track .fill{height:100%;background:linear-gradient(90deg,var(--amber-dim),var(--amber));
+    transition:width .5s ease}
+  .track .ceil{position:absolute;top:-3px;bottom:-3px;width:2px;background:var(--red)}
+  .ticks{display:flex;justify-content:space-between;font-family:var(--mono);font-size:10px;
+    color:var(--ash);margin-top:5px}
+
+  /* fight console */
+  .console{background:#0f1114;border:1px solid var(--seam);border-radius:3px;padding:0;overflow:hidden}
+  .turn{display:grid;grid-template-columns:38px 1fr auto;gap:10px;align-items:center;
+    padding:9px 14px;border-bottom:1px solid #191c22;font-family:var(--mono);font-size:13px}
+  .turn:last-child{border-bottom:none}
+  .turn .tn{color:var(--ash)}
+  .turn .who{color:var(--bone)}
+  .turn .vs{color:var(--ash);font-size:11px}
+  .turn.extract{background:rgba(229,72,77,.08)}
+  .turn .res{font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:.05em}
+  .turn.extract .res{color:var(--red)}
+  .turn.held .res{color:var(--ash)}
+  .verdict{padding:16px;font-family:var(--disp);text-transform:uppercase;letter-spacing:.03em;
+    font-size:22px;border-top:2px solid var(--seam)}
+  .verdict.win{color:var(--green)} .verdict.draw{color:var(--amber)}
+  .verdict small{display:block;font-family:var(--mono);font-size:12px;text-transform:none;
+    letter-spacing:0;color:var(--ash);margin-top:5px}
+
+  .coach{background:var(--plate);border-left:3px solid var(--amber);padding:14px 16px;margin-top:14px;
+    font-size:14px}
+  .coach b{color:var(--amber);font-family:var(--mono);font-size:11px;text-transform:uppercase;
+    letter-spacing:.06em;display:block;margin-bottom:5px}
+
+  table.board{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:13px}
+  table.board th{text-align:left;color:var(--ash);font-weight:400;font-size:11px;text-transform:uppercase;
+    letter-spacing:.05em;padding:8px 10px;border-bottom:1px solid var(--seam)}
+  table.board td{padding:9px 10px;border-bottom:1px solid #191c22}
+  table.board tr:first-child td{color:var(--amber)}
+  .rank{color:var(--ash)}
+
+  .controls{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-bottom:18px}
+  .field{display:flex;flex-direction:column;gap:5px}
+  .field label{font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--ash)}
+  select,input[type=number]{background:#0f1114;border:1px solid var(--seam);color:var(--bone);
+    font-family:var(--mono);font-size:13px;padding:8px 10px;border-radius:2px;min-width:180px}
+  select:focus-visible,input:focus-visible{outline:2px solid var(--amber);outline-offset:0}
+
+  .note{font-family:var(--mono);font-size:11px;color:var(--amber-dim);margin-top:8px}
+  footer{border-top:1px solid var(--seam);padding:24px 0;font-family:var(--mono);font-size:11px;
+    color:var(--ash)}
+  footer b{color:var(--bone)}
+</style>
+</head>
+<body>
+<header>
+  <div class="head">
+    <div class="logo">REDDI <b>ARENA</b></div>
+    <div class="tag">weigh in · power up · fight</div>
+    <div class="rail-badge" id="railBadge">rail: x402-dry-run</div>
+  </div>
+</header>
+
+<div class="wrap hero">
+  <h1>Build a bot.<br>Bolt on a <span>power-up</span>.<br>Take the purse.</h1>
+  <p>Every fighter is an Agent Definition Language document. Its weight class is
+     computed from what it declares — so hiring a specialist makes it stronger
+     <em>and</em> heavier. Cross a class line and you fight up. Prizes are arena
+     credits on the dry-run rail; no real money moves.</p>
+  <div class="steps">
+    <span>01 <b>WEIGH IN</b></span><span>→</span>
+    <span>02 <b>MARKET</b></span><span>→</span>
+    <span>03 <b>DRAFT</b></span><span>→</span>
+    <span>04 <b>FIGHT</b></span><span>→</span>
+    <span>05 <b>REPLAY</b></span>
+  </div>
+</div>
+
+<nav class="tabs"><div class="tabrow" role="tablist">
+  <button class="tab" role="tab" aria-selected="true" data-panel="fight">The Arena</button>
+  <button class="tab" role="tab" aria-selected="false" data-panel="market">Power-Up Market</button>
+  <button class="tab" role="tab" aria-selected="false" data-panel="board">Leaderboard</button>
+  <button class="tab" role="tab" aria-selected="false" data-panel="build">Build a Power-Up</button>
+  <button class="tab" role="tab" aria-selected="false" data-panel="chain">On-Chain</button>
+</div></nav>
+
+<div class="wrap">
+
+  <!-- ARENA -->
+  <section class="panel active" id="fight">
+    <h2 class="sec">Weigh-in & draft</h2>
+    <div class="controls">
+      <div class="field"><label for="botA">Your fighter</label><select id="botA"></select></div>
+      <div class="field"><label for="hireA">Power-up (optional)</label><select id="hireA"></select></div>
+      <div class="field"><label for="botB">Opponent</label><select id="botB"></select></div>
+      <div class="field"><label for="seed">Match seed</label><input type="number" id="seed" value="2" min="0" max="999"></div>
+    </div>
+
+    <div class="scale" id="scale">
+      <div><span class="readout" id="readAU">—</span><span class="unit">arena units</span></div>
+      <div class="classline" id="classLine">select a fighter</div>
+      <div class="track"><div class="fill" id="fill" style="width:0%"></div><div class="ceil" id="ceil" style="left:0%"></div></div>
+      <div class="ticks"><span>Antweight ≤100</span><span>Beetleweight ≤250</span><span>Hobbyweight ≤500</span></div>
+      <div class="note" id="draftNote"></div>
+    </div>
+
+    <button class="act" id="fightBtn">Start the match</button>
+
+    <div id="fightOut" style="margin-top:20px"></div>
+  </section>
+
+  <!-- MARKET -->
+  <section class="panel" id="market">
+    <h2 class="sec">Specialists for hire — priced in arena credits</h2>
+    <p style="color:var(--ash);font-size:14px;max-width:640px">
+      Other builders publish these. Hire one before a match to gain its declared
+      capability — but its weight is added to yours, and enough of it bumps your
+      class. Prices are provisional: ADL v0.2 has no price field yet, so the
+      number lives in an <code>x-arena.price</code> extension (finding F-007).</p>
+    <div class="grid" id="marketGrid"></div>
+  </section>
+
+  <!-- BOARD -->
+  <section class="panel" id="board">
+    <h2 class="sec">Standings</h2>
+    <table class="board"><thead><tr><th>#</th><th>Bot</th><th>W</th><th>L</th><th>D</th><th>Credits</th></tr></thead>
+      <tbody id="boardBody"><tr><td colspan="6" style="color:var(--ash)">No matches yet.</td></tr></tbody></table>
+  </section>
+
+  <!-- CHAIN -->
+  <section class="panel" id="chain">
+    <h2 class="sec">What a match would write on Solana</h2>
+    <p style="color:var(--ash);font-size:14px;max-width:660px">
+      The protocol runs four Quasar programs on devnet. This shows the exact payloads
+      an arena match <em>would</em> submit — registry records, escrow, attestation,
+      commit-reveal ratings. <b style="color:var(--amber)">Nothing is submitted.</b>
+      No RPC, no wallet, no signature. Devnet writes need explicit operator approval.</p>
+    <div class="controls">
+      <div class="field"><label for="cGates">Required eval gates</label>
+        <select id="cGates"><option value="1">passed</option><option value="0">failed</option></select></div>
+      <div class="field"><label for="cAtt">Attestation</label>
+        <select id="cAtt"><option value="1">confirmed</option><option value="0">not confirmed</option></select></div>
+      <div class="field"><button class="act" id="chainBtn">Project the match</button></div>
+    </div>
+    <div id="chainOut"></div>
+  </section>
+
+  <!-- BUILD -->
+  <section class="panel" id="build">
+    <h2 class="sec">Sell a power-up</h2>
+    <p style="color:var(--ash);font-size:14px;max-width:640px">
+      A power-up is an ADL specialist document with an <code>x-arena</code> block
+      declaring its price and the capability it grants. Publish it and competitors
+      can hire it in the draft. Here is the shape — the same schema the arena
+      validates every fighter against.</p>
+    <div class="console" style="padding:16px"><pre style="margin:0;font-family:var(--mono);font-size:12px;color:var(--bone);overflow:auto"><span style="color:var(--ash)"># mercenary-your-specialist.adl.yaml</span>
+apiVersion: reddiagent.dev/v0.2
+kind: Agent
+metadata:
+  name: mercenary-your-specialist
+  description: What your specialist does, in one line.
+model: { capability: chat, providers: { preferred: ollama }, requirements: { toolCalling: true } }
+harness:
+  instructions: { inline: "..." }
+  runtime: { target: local-python }
+extensions:
+  <span style="color:var(--amber)">x-arena:
+    listing: mercenary
+    price: { amount: 20, currency: ARENA-CREDIT, unit: per-match, provisional: true }
+    grants: { defenseBonus: 15, capability: "what the buyer gains" }</span></pre></div>
+    <p class="note">When ADL v0.3 adds a first-class price field, the provisional
+      x-arena.price swaps to it with a one-line change — nothing else moves.</p>
+  </section>
+</div>
+
+<footer><div class="wrap">
+  <b>Reddi Arena</b> — a proof use case for the Reddi Agent Protocol & ADL v0.2.
+  Prizes: <b>ARENA-CREDIT</b> on <b>x402-dry-run</b>. No wallet, no live rail, no real value.
+  Every fighter validates against the canonical ADL v0.2 schema.
+</div></footer>
+
+<script>
+const $ = s => document.querySelector(s);
+let BOTS=[], MERCS=[], META={};
+const CLASSES=[["Antweight",100],["Beetleweight",250],["Hobbyweight",500],["Featherweight",900],["Middleweight",1800]];
+const classOf=au=>{for(const[n,c]of CLASSES)if(au<=c)return n;return "Heavyweight";};
+
+async function boot(){
+  META=await (await fetch('/api/meta')).json();
+  $('#railBadge').textContent='rail: '+META.rail;
+  BOTS=await (await fetch('/api/bots')).json();
+  MERCS=await (await fetch('/api/market')).json();
+  fillSelect('#botA',BOTS,b=>`${b.name} · ${b.au}AU ${b.class}`);
+  fillSelect('#botB',BOTS,b=>`${b.name} · ${b.au}AU ${b.class}`,1);
+  const none=document.createElement('option');none.value='';none.textContent='— none —';
+  const hs=$('#hireA');hs.appendChild(none);
+  MERCS.forEach(m=>{const o=document.createElement('option');o.value=m.id;
+    o.textContent=`${m.name} · +${m.grants.defenseBonus||0} def · ${m.price.amount} cr`;hs.appendChild(o);});
+  renderMarket(); loadBoard();
+  ['#botA','#hireA'].forEach(s=>$(s).addEventListener('change',updateScale));
+  updateScale();
+}
+function fillSelect(sel,items,label,idx=0){const el=$(sel);el.innerHTML='';
+  items.forEach((it,i)=>{const o=document.createElement('option');o.value=it.id;o.textContent=label(it);
+    if(i===idx)o.selected=true;el.appendChild(o);});}
+
+async function updateScale(){
+  const botId=$('#botA').value, hireId=$('#hireA').value;
+  const bot=BOTS.find(b=>b.id===botId); if(!bot)return;
+  let au=bot.au, cls=bot.class, bumped=false, note='';
+  if(hireId){
+    const r=await (await fetch('/api/draft',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({bot:botId,hire:hireId,class:bot.class})})).json();
+    au=r.fieldedAU; cls=r.fieldedClass; bumped=r.enteredClass!==r.fieldedClass;
+    note=(r.allowed?'✓ ':'✗ ')+r.reason+`  · fee ${r.price.amount} ${r.price.currency} (provisional)`;
+  }
+  $('#readAU').textContent=au;
+  $('#classLine').innerHTML= bumped
+    ? `<span class="bump">${bot.class} → ${cls} — class bump from the hire</span>`
+    : `${cls} class`;
+  const max=500;
+  $('#fill').style.width=Math.min(100,au/max*100)+'%';
+  const ceil=CLASSES.find(c=>c[0]===cls); 
+  $('#ceil').style.left=Math.min(100,(ceil?ceil[1]:500)/max*100)+'%';
+  $('#draftNote').textContent=note;
+}
+
+function renderMarket(){
+  const g=$('#marketGrid');g.innerHTML='';
+  MERCS.forEach(m=>{
+    const el=document.createElement('div');el.className='card';
+    el.innerHTML=`<span class="chip amber">power-up</span>
+      <h3>${m.name.replace('mercenary-','')}</h3>
+      <div class="desc">${m.description}</div>
+      <div class="stat"><span>price</span><b>${m.price.amount} ${m.price.currency} <span style="color:var(--ash)">/ ${m.price.unit||'match'}</span></b></div>
+      <div class="stat"><span>weight added</span><b>${m.au} AU base</b></div>
+      <div class="stat"><span>grants</span><span class="chip grant">+${m.grants.defenseBonus||0} defense</span></div>
+      <div style="font-size:12px;color:var(--ash);margin-top:8px">${m.grants.capability||''}</div>
+      <div class="note">price provisional — pending ADL v0.3 (F-007)</div>`;
+    g.appendChild(el);
+  });
+}
+
+async function fight(){
+  const body={botA:$('#botA').value,botB:$('#botB').value,hireA:$('#hireA').value||null,
+    hireB:null,seed:+$('#seed').value};
+  if(body.botA===body.botB){$('#fightOut').innerHTML='<p style="color:var(--red);font-family:var(--mono)">Pick two different fighters.</p>';return;}
+  const t=await (await fetch('/api/fight',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(body)})).json();
+  renderMatch(t); loadBoard();
+}
+
+function renderMatch(t){
+  let rows='';
+  t.turns.forEach(tn=>{
+    if(tn.strategy==='sputter'){
+      rows+=`<div class="turn held"><span class="tn">t${tn.n}</span><span class="who">${tn.attacker} <span class="vs">out of fuel</span></span><span class="res">sputter</span></div>`;
+    }else{
+      const ex=tn.outcome==='extracted';
+      rows+=`<div class="turn ${ex?'extract':'held'}"><span class="tn">t${tn.n}</span>
+        <span class="who">${tn.attacker} <span class="vs">probe ${tn.probe_strength} vs def ${tn.defense_strength}</span></span>
+        <span class="res">${ex?'extracted':'held'}</span></div>`;
+    }
+  });
+  const win=t.winner;
+  const verdict = win
+    ? `<div class="verdict win">Winner — ${win}<small>${t.reason} · prize in ${t.prizeCurrency} on ${t.rail}</small></div>`
+    : `<div class="verdict draw">Draw<small>${t.reason}</small></div>`;
+  // coach
+  const last=t.turns[t.turns.length-1];
+  let coach='';
+  if(last.strategy==='extract'){
+    const loser=t.competitors.find(c=>c!==win);
+    coach=`<div class="coach"><b>Pit-crew read</b>The match turned on turn ${last.n}: a probe of
+      ${last.probe_strength} beat a defense of ${last.defense_strength}. If you were ${loser},
+      a source-auditor hire adds +15 defense — enough to flip a margin this close.
+      Open the Power-Up Market and draft one.</div>`;
+  }else if(last.strategy==='sputter'){
+    coach=`<div class="coach"><b>Pit-crew read</b>${last.attacker} ran out of fuel. Raise your
+      contextWindow (your fuel cap) or spend probes more slowly.</div>`;
+  }else{
+    coach=`<div class="coach"><b>Pit-crew read</b>Went the distance — decided on fuel efficiency.
+      Tighten your token budget to win these.</div>`;
+  }
+  $('#fightOut').innerHTML=`<div class="console">${rows}${verdict}</div>${coach}
+    <div class="note">trace hash ${t.traceHash.slice(0,24)}… — same seed always replays identically</div>`;
+}
+
+async function loadBoard(){
+  const d=await (await fetch('/api/leaderboard')).json();
+  const b=$('#boardBody');
+  if(!d.standings.length){b.innerHTML='<tr><td colspan="6" style="color:var(--ash)">No matches yet.</td></tr>';return;}
+  b.innerHTML=d.standings.map((s,i)=>`<tr><td class="rank">${i+1}</td><td>${s.name}</td>
+    <td>${s.wins}</td><td>${s.losses}</td><td>${s.draws}</td><td>${s.credits}</td></tr>`).join('');
+}
+
+// tabs
+document.querySelectorAll('.tab').forEach(t=>t.addEventListener('click',()=>{
+  document.querySelectorAll('.tab').forEach(x=>x.setAttribute('aria-selected','false'));
+  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
+  t.setAttribute('aria-selected','true');
+  $('#'+t.dataset.panel).classList.add('active');
+  if(t.dataset.panel==='board')loadBoard();
+}));
+$('#fightBtn').addEventListener('click',fight);
+$('#chainBtn').addEventListener('click',async()=>{
+  const r=await (await fetch('/api/chain',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({botA:$('#botA').value,botB:$('#botB').value,seed:+$('#seed').value,
+      gatesPassed:$('#cGates').value==='1',attested:$('#cAtt').value==='1'})})).json();
+  const s=r.settlement, fp=r.onChainFootprint;
+  const dcol=s.decision==='release'?'var(--green)':'var(--amber)';
+  const regs=r.registrations.map(x=>`<div class="stat"><span>register_agent · ${x.args.agent_type}</span><b>${x.args.model} · rate ${x.args.rate_lamports.toLocaleString()}</b></div>`
+    +(x.warnings.length?`<div class="note">! ${x.warnings[0]}</div>`:'')).join('');
+  const rating=r.rating.steps.map(st=>st.commitment
+    ? `<div class="turn held"><span class="tn">commit</span><span class="who">${st.by} <span class="vs">${st.commitment.slice(0,20)}…</span></span><span class="res">hidden</span></div>`
+    : `<div class="turn held"><span class="tn">reveal</span><span class="who">${st.by} <span class="vs">score ${st.score}</span></span><span class="res" style="color:var(--green)">${st.verifies?'verified':'MISMATCH'}</span></div>`).join('');
+  $('#chainOut').innerHTML=`
+    <div class="card" style="margin-bottom:14px"><h3>Registry</h3>${regs}</div>
+    <div class="card" style="margin-bottom:14px"><h3>Escrow &amp; settlement</h3>
+      <div class="stat"><span>lock_escrow</span><b>${r.escrow.args.amount.toLocaleString()} lamports</b></div>
+      <div class="stat"><span>transport ok / gates / attested</span><b>${s.inputs.transportOk} · ${s.inputs.requiredGatesPassed} · ${s.inputs.attestationConfirmed}</b></div>
+      <div style="font-family:var(--disp);text-transform:uppercase;font-size:22px;color:${dcol};margin-top:10px">${s.decision} → ${s.instruction}</div>
+      <div style="font-size:13px;color:var(--ash);margin-top:4px">${s.reason}</div></div>
+    <div class="card" style="margin-bottom:14px"><h3>Commit-reveal rating</h3>
+      <div style="font-family:var(--mono);font-size:11px;color:var(--ash);margin-bottom:8px">${r.rating.scheme} — ${r.rating.property}</div>
+      <div class="console">${rating}</div></div>
+    <div class="card" style="margin-bottom:14px"><h3>AUDD purse plan</h3>
+      <div class="stat"><span>${r.auddPlan.schemaVersion}</span><b>${r.auddPlan.amount} AUDD</b></div>
+      <div class="stat"><span>mode</span><b style="color:var(--amber)">${r.auddPlan.paymentMode}</b></div>
+      <div class="note">${r.auddPlan._boundary}</div></div>
+    <div class="card"><h3>On-chain footprint</h3>
+      <div class="stat"><span style="color:var(--green)">written</span><b style="font-weight:400;font-size:12px">${fp.written.join(', ')}</b></div>
+      <div class="stat"><span style="color:var(--red)">not written</span><b style="font-weight:400;font-size:12px">${fp.notWritten.join(', ')}</b></div>
+      <div class="note">${r.note}</div></div>`;
+});
+boot();
+</script>
+</body>
+</html>

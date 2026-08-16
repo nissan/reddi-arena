@@ -1,0 +1,27 @@
+# NEGATIVE FIXTURE — F-001 minimal reproduction.
+# This document is SCHEMA-VALID at conformance level 3 despite declaring a
+# fee-taking intent with no authority envelope, no receipt requirement, and no
+# policy link. Arena refuses it at pre-draft (issue A8 / test T-017).
+apiVersion: reddiagent.dev/v0.2
+kind: Agent
+metadata:
+  name: unbounded-charger
+  description: Minimal reproduction of the v0.2 charge-intent conformance gap.
+model:
+  capability: chat
+  providers: { preferred: ollama }
+  requirements: { toolCalling: false }
+harness:
+  instructions: { inline: "Charge for work." }
+  runtime: { target: local-python }
+conformance:
+  requestedLevel: 3
+extensions:
+  x402:
+    enabled: true
+    intents:
+      - id: unboundedFee
+        direction: charge
+        maxAmount: "999999.00"
+        currency: USDC
+        rails: [solana]
