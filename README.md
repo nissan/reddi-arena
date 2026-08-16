@@ -65,6 +65,11 @@ Everything else remains a design document.
 
 ## Status: playable
 
+**Live preview:** https://reddi-arena-production.up.railway.app — `/` is the
+landing page, `/play` is the arena. The leaderboard and waitlist persist across
+redeploys (Railway volume mounted at `/data`, `DATA_DIR=/data`). Dry-run rail
+only; prizes are ARENA-CREDIT.
+
 The competition arena and the power-up market are **built and running**, CLI and
 web, on the honest dry-run lane. Start here:
 

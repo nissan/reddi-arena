@@ -1,6 +1,6 @@
 # REASONS-LITE — Reddi Arena Project Kickoff
 
-_Status: in-progress | Owner: TBD on behalf of Nissan | Project: reddi-arena | Issue/PR: TBD_
+_Status: done | Owner: Claude Code session on behalf of Nissan | Project: reddi-arena | Issue/PR: seed commits on main (pre-issue-graph)_
 
 ## R — Requirements / Definition of Done
 
@@ -16,9 +16,10 @@ DoD checklist:
 - [x] Local project scaffold exists (core, cli, web, adl, tools, tests, docs).
 - [x] 55-test suite green; balance report published; landing page honest.
 - [x] SPDD artifacts + issue script generated from the plan graph.
-- [ ] GitHub repo `nissan/reddi-arena` exists and is pushed.
-- [ ] `github/create-issues.sh` run once; issue numbers recorded.
-- [ ] Railway service created from the repo; domain generated; preview verified.
+- [x] GitHub repo `nissan/reddi-arena` exists and is pushed.
+- [x] `github/create-issues.sh` run once; issue numbers recorded (#1–#36 via
+      GitHub API — environment had no `gh` CLI; same titles/bodies/labels/order).
+- [x] Railway service created from the repo; domain generated; preview verified.
 
 ## E — Entities / Handoff Objects
 
@@ -68,11 +69,15 @@ DoD checklist:
 
 - [x] No secrets in code, logs, or artifacts (no keypair/RPC/wallet code exists).
 - [x] Landing page honesty asserted by tests (no audit/mainnet/production claims).
-- [ ] Repo pushed; issues created; preview URL recorded.
-- [ ] Volume decision recorded (ephemeral vs persistent waitlist).
+- [x] Repo pushed; issues created; preview URL recorded.
+- [x] Volume decision recorded (ephemeral vs persistent waitlist): **persistent**
+      — Railway volume `reddi-arena-data` mounted at `/data`, `DATA_DIR=/data`;
+      `/api/health` reports `"persistent": true`.
 
 ## Prompt/Code Sync Log
 
 | Date | Divergence | Artifact update | Code/test update |
 |---|---|---|---|
 | 2026-08-05 | Scaffold + generator built before repo exists | GitHub/Railway tasks pending | 55 tests green locally |
+| 2026-08-16 | Preview shipped: main pushed, issues #1–#36 created (GitHub API, no `gh` CLI available), Railway deploy live at https://reddi-arena-production.up.railway.app with persistent `/data` volume | DoD + safeguards checked off; status → done | 55 tests green pre-push; deployed checks pass: /api/health `{"ok": true, "persistent": true}`, `/` 200, `/play` 200, /api/fight (raider vs defender, seed 2) → winner `antweight-vault-raider` |
+| 2026-08-16 | O-5 says record URL "in README and STATUS" but the repo has no STATUS.md | Recorded in README only; noted here | — |
