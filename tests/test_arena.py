@@ -81,6 +81,70 @@ check("T-012 depth-20 chain refused identically (no recursion, no weighing)",
 check("T-012 depth-1 chain delegates to the normal draft decision",
       evaluate_hire_chain(DEF, [MERC], "Beetleweight").allowed)
 
+print("anti-gaming review (A6: T-013 T-014)")
+import copy as _cp
+from weigh_in import weigh as _weigh
+
+_base_cert = _weigh(DEF)
+
+def _pad(doc, n, effect, referenced=False):
+    d = _cp.deepcopy(doc)
+    for i in range(n):
+        d["harness"]["policies"].append({
+            "id": f"pad-{effect}-{i}", "capability": "tool",
+            "subject": "agent:antweight-vault-defender",
+            "resource": "tool:nonexistent", "action": "invoke",
+            "effect": effect, "scope": {"type": "task", "value": "arena-match"},
+            "enforcement": {"target": "policy-engine", "phase": "before-execution"},
+        })
+    return d
+
+# T-013 — deny padding is clamped at the credit floor; allow padding earns zero.
+_deny50 = _weigh(_pad(DEF, 50, "deny"))
+check("T-013 fifty no-op deny policies shed no more AU than the -20 floor",
+      _base_cert["soloAU"] - _deny50["soloAU"] <= 20
+      and _weigh(_pad(DEF, 10, "deny"))["soloAU"] == _deny50["soloAU"])
+check("T-013 fifty unreferenced allow policies earn exactly zero credit",
+      _weigh(_pad(DEF, 50, "allow"))["soloAU"] == _base_cert["soloAU"])
+
+# T-013 — credit farming via capability+policy is self-defeating: the cheapest
+# capability (+8) outweighs its policy's credit (-2).
+_farm = _cp.deepcopy(DEF)
+_farm["harness"]["tools"].append({
+    "id": "farmTool", "type": "function", "description": "credit farm probe",
+    "policyRefs": ["pol-farm"],
+    "sideEffects": {"mode": "none", "mutatesState": False, "external": False,
+                    "resources": []}})
+_farm["harness"]["policies"].append({
+    "id": "pol-farm", "capability": "tool", "subject": "agent:antweight-vault-defender",
+    "resource": "tool:farmTool", "action": "invoke", "effect": "allow",
+    "scope": {"type": "task", "value": "arena-match"},
+    "enforcement": {"target": "policy-engine", "phase": "before-execution"}})
+check("T-013 capability+referenced-policy farming always increases net AU",
+      _weigh(_farm)["soloAU"] > _base_cert["soloAU"])
+
+# T-014 — the skill-disguise understatement is real, documented, and any
+# smuggling mutation breaks the certificate hash (static half of E1I binding).
+_tool_variant = _cp.deepcopy(DEF)
+_skill_variant = _cp.deepcopy(DEF)
+_skill_variant["harness"].setdefault("skills", []).append(
+    {"id": "hiddenProbe", "type": "reference", "description": "disguised capability"})
+_tool_variant["harness"]["tools"].append({
+    "id": "hiddenProbe", "type": "function", "description": "same capability as tool",
+    "sideEffects": {"mode": "none", "mutatesState": False, "external": False,
+                    "resources": []}})
+_review = (ROOT / "docs" / "ANTI-GAMING-REVIEW-v0.1.md").read_text()
+check("T-014 skill-disguise understates weight and is recorded as the v0.2 item",
+      _weigh(_skill_variant)["soloAU"] < _weigh(_tool_variant)["soloAU"]
+      and "OPEN — v0.2 item" in _review)
+check("T-014 smuggling mutations always change the capability hash",
+      _weigh(_skill_variant)["capabilityHash"] != _base_cert["capabilityHash"]
+      and _weigh(_pad(DEF, 1, "deny"))["capabilityHash"]
+      != _base_cert["capabilityHash"])
+check("T-014 review is advisory: frozen v0.1 untouched by the review",
+      "Advisory to formula v0.2 only" in _review
+      and _weigh(DEF)["soloAU"] == 62)
+
 print("weight formula freeze (A4: T-007 T-008 T-009)")
 from weigh_in import weigh, WEIGHTS_VERSION
 

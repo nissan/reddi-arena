@@ -11,8 +11,8 @@ Any scoring function invites optimisation against its own artifacts.
 
 **DoD checklist:**
 
-- [ ] No-op policy padding cannot reduce AU below the declared floor
-- [ ] Understated declarations are detectable at runtime by E13 binding
+- [x] No-op policy padding cannot reduce AU below the declared floor
+- [x] Understated declarations are detectable at runtime by E13 binding
 - [ ] Exploit report exists and is linked from the formula spec
 
 ## E — Entities / Handoff Objects
@@ -91,3 +91,4 @@ Review output is advisory to formula v0.2; it does not change v0.1 mid-season.
 | Date | Divergence | Artifact update | Code/test update |
 |---|---|---|---|
 | 2026-08-05 | Generated from plan/backlog.yaml (ready) | initial | n/a |
+| 2026-08-17 | DISCOVER staleness: defenses partially built (credit floor, referenced-only allow rule existed); the REVIEW itself did not. Six vectors tried, verdicts locked as suite checks: deny-padding bounded by floor, allow-padding neutralized, credit farming self-defeating, certificate-hash reuse bounded; two OPEN items recorded honestly — skill-disguise weight understatement (top v0.2 candidate; runtime containment via E1I/E2I, not formula) and context under-declaration (already Known Limitation 2). T-014's runtime-binding half belongs to E1I (blocked); the A6 share is the static half (hash binding) + the documented vector. | DoD checked; this row | docs/ANTI-GAMING-REVIEW-v0.1.md; tests +6 (T-013 ×3, T-014 ×3), suite 83→89. Executed as graph node A6 (branch node/A6-anti-gaming-review). |
