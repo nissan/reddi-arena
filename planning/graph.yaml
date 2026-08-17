@@ -114,7 +114,7 @@ nodes:
 - id: A3
   type: implementation
   title: Define the arena-profile extension namespace
-  status: ready
+  status: done
   objective: Arena needs match-specific metadata (format, class, fuel cap) without polluting
     canonical ADL.
   epic: E01
@@ -139,6 +139,10 @@ nodes:
     - test-output
     - pr-review
     - spdd artifact (spdd/prompt/*-a3-*.md) Sync Log updated
+    recorded:
+    - 'PR #44 (merged 2026-08-17, closes #3): docs/ARENA-PROFILE-v0.1.md; x-arena
+      lint on real docs + 2 gap fixtures (corpus 24->26); suite 72->77 green
+      pre/post rebase; CI verify job green on first PR run.'
   boundary: An x- namespace is Arena-local. It confers no canonical status and must not carry
     payment-like semantics.
   surfaces:
