@@ -194,7 +194,7 @@ nodes:
 - id: A5
   type: implementation
   title: Implement coupled weight for hired specialists
-  status: ready
+  status: done
   objective: The class-bump-on-hire tradeoff is the core strategic mechanic and must be computed
     identically by every implementation.
   epic: E02
@@ -222,6 +222,10 @@ nodes:
     - test-output
     - pr-review
     - spdd artifact (spdd/prompt/*-a5-*.md) Sync Log updated
+    recorded:
+    - 'PR #45 (merged 2026-08-17, closes #5): T-010/T-011 locked as goldens;
+      T-012 hire-depth cap implemented (HIRE_DEPTH_CAP=1, O(1) refusal) as a
+      draft rule outside the frozen formula; suite 77->83 green pre/post rebase.'
   boundary: Computing coupled weight does not engage a specialist or move value.
   surfaces:
     allow: *id001
