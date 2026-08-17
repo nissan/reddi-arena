@@ -235,7 +235,7 @@ nodes:
 - id: A6
   type: verification
   title: Anti-gaming review of the weight formula
-  status: ready
+  status: done
   objective: Any scoring function invites optimisation against its own artifacts.
   epic: E02
   lane: SL-A
@@ -259,6 +259,10 @@ nodes:
     - test-output
     - pr-review
     - spdd artifact (spdd/prompt/*-a6-*.md) Sync Log updated
+    recorded:
+    - 'PR #46 (rebase-merged 2026-08-17, closes #6): docs/ANTI-GAMING-REVIEW-v0.1.md
+      with six vectors (4 bounded/neutralized, 2 OPEN feeding v0.2); T-013/T-014
+      static share locked in-suite; suite 83->89 green pre/post rebase.'
   boundary: Review output is advisory to formula v0.2; it does not change v0.1 mid-season.
   surfaces:
     allow: *id001
