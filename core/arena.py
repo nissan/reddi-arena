@@ -98,6 +98,39 @@ def weigh_competitor(doc: dict, hires: list[dict] | None = None) -> dict:
     return weigh(doc, hire_certs)
 
 
+# Draft rule (A5): a fielded specialist cannot itself field sub-hires in v0.1.
+# The cap is checked before any weighing, so hire chains can never recurse.
+HIRE_DEPTH_CAP = 1
+
+
+def evaluate_hire_chain(competitor_doc: dict, chain: list[dict],
+                        entered_class: str) -> DraftResult:
+    """Evaluate a hire chain [specialist, specialist's-hire, ...].
+
+    Depth beyond HIRE_DEPTH_CAP is refused at draft with a stated reason —
+    deterministically and without weighing anything, so an adversarial chain of
+    any length costs O(1).
+    """
+    depth = len(chain)
+    if depth > HIRE_DEPTH_CAP:
+        return DraftResult(
+            allowed=False,
+            reason=(f"transitive hire depth {depth} exceeds cap {HIRE_DEPTH_CAP}: "
+                    f"a fielded specialist cannot itself field sub-hires in "
+                    f"weights v0.1. Drop the sub-hire chain."),
+            solo_au=0, fielded_au=0,
+            entered_class=entered_class, fielded_class=entered_class,
+        )
+    if not chain:
+        solo = weigh(competitor_doc)
+        return DraftResult(
+            allowed=True, reason="no hires requested.",
+            solo_au=solo["soloAU"], fielded_au=solo["soloAU"],
+            entered_class=entered_class, fielded_class=solo["soloClass"],
+        )
+    return evaluate_hire(competitor_doc, chain[0], entered_class)
+
+
 def evaluate_hire(competitor_doc: dict, merc_doc: dict, entered_class: str) -> DraftResult:
     """Decide whether a competitor may hire a specialist without breaching its class."""
     solo = weigh(competitor_doc)

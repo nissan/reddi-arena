@@ -70,6 +70,15 @@ The 0.6 coupling factor says a hired specialist costs less than owning the
 capability outright; the flat 10 is integration overhead. This is what makes the
 draft a real decision instead of a free power-up.
 
+### Hire depth (draft rule)
+
+A fielded specialist cannot itself field sub-hires: the transitive hire depth
+cap is **1** in v0.1. Deeper chains are refused at draft with the cap stated,
+before any weighing occurs — an adversarial chain of any length is rejected in
+constant time. This is a draft-eligibility rule, not part of the frozen AU
+formula; raising the cap is a v0.2 formula-spec question because coupled
+weight would then need a composition rule.
+
 ## Class bands
 
 | Class | AU ceiling |

@@ -54,6 +54,33 @@ check("refusal shows the AU delta", d_ant.au_delta == 65 and d_ant.fielded_au ==
 d_beetle = evaluate_hire(DEF, MERC, "Beetleweight")
 check("same hire allowed at Beetleweight", d_beetle.allowed)
 
+print("coupled weight for hires (A5: T-010 T-011 T-012)")
+from core.arena import evaluate_hire_chain, HIRE_DEPTH_CAP
+
+# T-010 — the golden hire: 62 -> 127 AU, Antweight -> Beetleweight, bump flagged.
+_fielded = weigh_competitor(DEF, [MERC])
+check("T-010 hiring the mercenary moves 62 -> 127 AU",
+      _fielded["soloAU"] == 62 and _fielded["fieldedAU"] == 127)
+check("T-010 fielded class bumps Antweight -> Beetleweight, flagged",
+      _fielded["fieldedClass"] == "Beetleweight" and _fielded["classBumped"] is True)
+
+# T-011 — breach is rejected at draft (pure eligibility, no match ran) with the
+# ceiling and delta stated.
+_refusal = evaluate_hire(DEF, MERC, "Antweight")
+check("T-011 breach refused at draft with ceiling and delta stated",
+      not _refusal.allowed and "ceiling 100" in _refusal.reason
+      and "65 AU" in _refusal.reason)
+
+# T-012 — transitive hire depth beyond the cap is refused, stated, and O(1).
+_chain2 = evaluate_hire_chain(DEF, [MERC, MERC], "Beetleweight")
+check("T-012 depth-2 chain refused with cap stated",
+      not _chain2.allowed and f"cap {HIRE_DEPTH_CAP}" in _chain2.reason)
+_chain20 = evaluate_hire_chain(DEF, [MERC] * 20, "Heavyweight")
+check("T-012 depth-20 chain refused identically (no recursion, no weighing)",
+      not _chain20.allowed and _chain20.solo_au == 0)
+check("T-012 depth-1 chain delegates to the normal draft decision",
+      evaluate_hire_chain(DEF, [MERC], "Beetleweight").allowed)
+
 print("weight formula freeze (A4: T-007 T-008 T-009)")
 from weigh_in import weigh, WEIGHTS_VERSION
 
