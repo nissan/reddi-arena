@@ -11,9 +11,9 @@ The class-bump-on-hire tradeoff is the core strategic mechanic and must be compu
 
 **DoD checklist:**
 
-- [ ] Hiring a specialist increases fielded AU and can change fielded class
-- [ ] A hire that would exceed the entered class is rejected at draft, not mid-match
-- [ ] Transitive hire depth beyond the cap is refused with a stated reason
+- [x] Hiring a specialist increases fielded AU and can change fielded class
+- [x] A hire that would exceed the entered class is rejected at draft, not mid-match
+- [x] Transitive hire depth beyond the cap is refused with a stated reason
 
 ## E — Entities / Handoff Objects
 
@@ -91,3 +91,4 @@ Computing coupled weight does not engage a specialist or move value.
 | Date | Divergence | Artifact update | Code/test update |
 |---|---|---|---|
 | 2026-08-05 | Generated from plan/backlog.yaml (ready) | initial | n/a |
+| 2026-08-17 | DISCOVER staleness: mostly built. Coupled weight (ceil(0.6·AU)+10), class-bump computation, and draft refusal with AU delta all existed and were partially tested. The genuine gap was T-012: no transitive-hire-depth concept anywhere. Added HIRE_DEPTH_CAP=1 + evaluate_hire_chain (cap checked before any weighing — O(1) refusal for chains of any length) as a DRAFT rule, deliberately outside the frozen AU formula; spec gains a "Hire depth (draft rule)" section noting that raising the cap is a v0.2 formula-spec question (coupled weight would need a composition rule). | DoD checked; this row | core/arena.py: evaluate_hire_chain + HIRE_DEPTH_CAP; docs/WEIGHT-CLASS-v0.1.md draft-rule section; tests +6 (T-010 ×2, T-011, T-012 ×3), suite 77→83. Executed as graph node A5 (branch node/A5-coupled-weight). |
