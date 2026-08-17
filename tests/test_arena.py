@@ -116,6 +116,24 @@ _va = _sp.run([sys.executable, str(ROOT / "tools" / "validate_adl.py")],
 check("T-003/T-004 validator enforces the manifest (zero silent passes)",
       _va.returncode == 0 and "FAIL" not in _va.stdout)
 
+print("arena-profile namespace (A3: T-005 T-006)")
+_prof = (ROOT / "docs" / "ARENA-PROFILE-v0.1.md").read_text()
+check("T-005 profile spec exists and is Arena-local, non-canonical",
+      "confers no canonical status" in _prof.lower() or "Confers no canonical" in _prof)
+_va_out = _sp.run([sys.executable, str(ROOT / "tools" / "validate_adl.py")],
+                  capture_output=True, text=True, cwd=ROOT)
+check("T-005 all reference documents are x-arena profile clean",
+      _va_out.returncode == 0
+      and _va_out.stdout.count("T-005 PASS") >= 3
+      and "T-005 FAIL" not in _va_out.stdout)
+check("T-006 payment machinery under x-arena is rejected",
+      "x-arena-payment-intent.yaml: schema-valid documented gap" in _va_out.stdout)
+check("T-006 unspecified x-arena keys are rejected",
+      "x-arena-unspecified-key.yaml: schema-valid documented gap" in _va_out.stdout)
+check("T-006 unprefixed arena namespace fails the schema itself",
+      "extensions-unprefixed-namespace.yaml: fails with declared diagnostic"
+      in _va_out.stdout)
+
 print("one-way canonicality (F3: T-092 T-093)")
 import hashlib as _hl
 import re as _re093

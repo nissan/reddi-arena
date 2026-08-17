@@ -11,9 +11,9 @@ Arena needs match-specific metadata (format, class, fuel cap) without polluting 
 
 **DoD checklist:**
 
-- [ ] x-arena fields validate under strict mode
-- [ ] An unprefixed "arena:" key fails strict validation
-- [ ] No payment, spend, or authority semantics exist in x-arena
+- [x] x-arena fields validate under strict mode
+- [x] An unprefixed "arena:" key fails strict validation
+- [x] No payment, spend, or authority semantics exist in x-arena
 
 ## E — Entities / Handoff Objects
 
@@ -90,3 +90,4 @@ An x- namespace is Arena-local. It confers no canonical status and must not carr
 | Date | Divergence | Artifact update | Code/test update |
 |---|---|---|---|
 | 2026-08-05 | Generated from plan/backlog.yaml (ready) | initial | n/a |
+| 2026-08-16 | DISCOVER staleness: partially built. x-arena was in live use with a vocabulary (league, strategy, listing, price, grants) different from the artifact's planned fields (format, declaredClass, fuelCap, seasonId). Node specified the vocabulary that exists, reserved the planned fields, and enforced the closed set. One tension resolved in-spec: the provisional x-arena.price (F-007) is payment-ADJACENT display metadata; the boundary's "no payment-like semantics" is enforced as a forbidden-machinery list (intents/authority/rails/receipts/etc. at any depth) with price documented as the F-007 exception. | DoD checked; this row | docs/ARENA-PROFILE-v0.1.md; x-arena lint (unknown-key + payment-semantics) in validate_adl.py, applied to real docs (T-005) and two new gap fixtures (corpus 24→26); suite 72→77. Executed as graph node A3 (branch node/A3-arena-profile-namespace). |

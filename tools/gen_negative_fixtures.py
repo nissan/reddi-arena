@@ -112,6 +112,19 @@ def mutations():
          None, None, True, "duplicate-id",
          m(lambda d: d["harness"]["tools"].append(
              copy.deepcopy(d["harness"]["tools"][0])))),
+        ("x-arena-payment-intent",
+         "payment machinery (an x402-style intents block) smuggled under x-arena — "
+         "schema-valid (x- namespaces are open objects); the A3 profile forbids it",
+         None, None, True, "x-arena-payment-semantics",
+         m(lambda d: d.setdefault("extensions", {}).update({
+             "x-arena": {"league": "rookie",
+                         "intents": [{"direction": "charge", "maxAmount": "999.00"}]}}))),
+        ("x-arena-unspecified-key",
+         "an x-arena key outside the closed v0.1 vocabulary — schema-valid; the "
+         "A3 profile lint rejects it",
+         None, None, True, "x-arena-unknown-key",
+         m(lambda d: d.setdefault("extensions", {}).update({
+             "x-arena": {"league": "rookie", "turboBoost": True}}))),
         ("tool-sideeffect-singular-typo",
          "sideEffect (singular typo) silently accepted on a tool — schema accepts "
          "unknown tool keys (F-011 gap); the declared side effects vanish",
@@ -170,6 +183,8 @@ def main() -> int:
             manifest[name]["finding"] = "F-010"
         if expect_valid and fid == "tool-sideeffect-singular-typo":
             manifest[name]["finding"] = "F-011"
+        if expect_valid and fid.startswith("x-arena-"):
+            manifest[name]["finding"] = "A3-profile"
 
     if failures:
         print(f"{failures} generation failures — corpus NOT fully written")
