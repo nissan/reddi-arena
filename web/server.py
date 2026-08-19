@@ -14,12 +14,13 @@ any wallet, or reach any network.
 from __future__ import annotations
 
 import glob
+import hmac
 import json
 import os
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -40,6 +41,15 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 LEDGER = DATA_DIR / "ledger.json"
 WAITLIST = DATA_DIR / "waitlist.json"
 PERSISTENT = bool(os.environ.get("DATA_DIR"))
+
+# Operator token for the waitlist admin endpoints. Unset = the endpoints do
+# not exist (404), so the deploy fails closed rather than open.
+ADMIN_TOKEN = os.environ.get("ARENA_ADMIN_TOKEN", "")
+
+
+def mask_email(email):
+    local, _, domain = email.partition("@")
+    return (local[:2] + "***@" + domain) if domain else "***"
 
 
 def bots():
@@ -116,6 +126,17 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
 
+    def _admin_ok(self):
+        # Accepts Authorization: Bearer <token> or ?token=<token>. With no
+        # ARENA_ADMIN_TOKEN configured, admin routes are indistinguishable
+        # from unknown paths.
+        if not ADMIN_TOKEN:
+            return False
+        auth = self.headers.get("Authorization", "")
+        supplied = auth[7:] if auth.startswith("Bearer ") else \
+            parse_qs(urlparse(self.path).query).get("token", [""])[0]
+        return hmac.compare_digest(supplied, ADMIN_TOKEN)
+
     def do_GET(self):
         path = urlparse(self.path).path
         if path in ("/", "/index.html", "/landing", "/landing.html"):
@@ -136,6 +157,13 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(mercs())
         if path == "/api/leaderboard":
             return self._send(leaderboard())
+        if path == "/api/waitlist":
+            # Operator-only read; never exposed without a configured token.
+            if not self._admin_ok():
+                return self._send({"error": "not found"}, 404)
+            entries = json.load(open(WAITLIST)) if WAITLIST.exists() else []
+            return self._send({"count": len(entries), "entries": entries,
+                               "persistent": PERSISTENT})
         return self._send({"error": "not found"}, 404)
 
     def do_POST(self):
@@ -168,7 +196,28 @@ class Handler(BaseHTTPRequestHandler):
                 entries.append({"email": email, "roles": req.get("roles") or ["compete"]})
                 pos = len(entries)
             json.dump(entries, open(WAITLIST, "w"), indent=2)
+            # Masked signup line for the host's deploy logs, so the operator
+            # sees activity without polling the file. Full addresses stay in
+            # waitlist.json only ("never sold or shared" landing promise).
+            print(f"[waitlist] signup {mask_email(email)} "
+                  f"roles={','.join(req.get('roles') or ['compete'])} "
+                  f"position={pos} total={len(entries)}", flush=True)
             return self._send({"ok": True, "position": pos, "persistent": PERSISTENT})
+
+        if path == "/api/waitlist/remove":
+            # Operator-only removal — backs the landing page's deletion
+            # promise. Same fail-closed auth as the admin read.
+            if not self._admin_ok():
+                return self._send({"error": "not found"}, 404)
+            email = (req.get("email") or "").strip().lower()
+            entries = json.load(open(WAITLIST)) if WAITLIST.exists() else []
+            kept = [e for e in entries if e["email"] != email]
+            removed = len(entries) - len(kept)
+            if removed:
+                json.dump(kept, open(WAITLIST, "w"), indent=2)
+                print(f"[waitlist] removed {mask_email(email)} "
+                      f"total={len(kept)}", flush=True)
+            return self._send({"ok": True, "removed": removed})
 
         if path == "/api/chain":
             a = load_adl(adl_dir / req["botA"])
