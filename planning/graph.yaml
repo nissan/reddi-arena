@@ -1370,7 +1370,7 @@ nodes:
 - id: F4
   type: implementation
   title: Enforce claims discipline across all public Arena surfaces
-  status: ready
+  status: done
   objective: The 2026-08-01 operational correction exists because planning was being reported
     as implementation. A public game multiplies that risk.
   epic: E16
@@ -1395,6 +1395,14 @@ nodes:
     - test-output
     - pr-review
     - spdd artifact (spdd/prompt/*-f4-*.md) Sync Log updated
+    recorded:
+    - 'PR #47 (merged 2026-08-19, closes #36): claims_lint over 5 public surfaces
+      (negation-aware, hostname-allowlisted) with in-suite bite-test; release-state
+      banner in README; CI step added; suite 89->92 green pre/post rebase.'
+    - 'P0 FOUNDRY EXIT GATE SATISFIED 2026-08-19: all eight P0 nodes done with
+      recorded evidence (A1-A6, F3, F4); exit condition "All P0 tests green; ADL
+      fixtures validate against published schema" holds — 92-check suite, 26-fixture
+      corpus, and all four lints green in CI on main.'
   boundary: This issue governs what Arena says about itself. It creates no technical capability.
   surfaces:
     allow: *id006
