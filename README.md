@@ -70,6 +70,13 @@ landing page, `/play` is the arena. The leaderboard and waitlist persist across
 redeploys (Railway volume mounted at `/data`, `DATA_DIR=/data`). Dry-run rail
 only; prizes are ARENA-CREDIT.
 
+**Release state:** playable preview on the `x402-dry-run` rail. Every
+capability claim on this page is backed by the check suite in
+[`tests/test_arena.py`](tests/test_arena.py), run in CI on every push and PR
+together with the schema, claims, and graph lints; current gate status is
+whatever `python3 tools/graph_lint.py` prints. No security audit has been
+performed, and nothing here is mainnet- or production-ready.
+
 The competition arena and the power-up market are **built and running**, CLI and
 web, on the honest dry-run lane. Start here:
 

@@ -16,4 +16,5 @@ jobs:
       - run: pip install pyyaml jsonschema solders
       - run: python3 tools/validate_adl.py
       - run: python3 tools/graph_lint.py
+      - run: python3 tools/claims_lint.py
       - run: python3 tests/test_arena.py

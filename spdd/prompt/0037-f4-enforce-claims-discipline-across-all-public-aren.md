@@ -11,9 +11,9 @@ The 2026-08-01 operational correction exists because planning was being reported
 
 **DoD checklist:**
 
-- [ ] No public surface claims audit completion or mainnet readiness
-- [ ] Every capability claim links to a passing test or a published artifact
-- [ ] A closed planning issue is never rendered as a shipped capability
+- [x] No public surface claims audit completion or mainnet readiness
+- [x] Every capability claim links to a passing test or a published artifact
+- [x] A closed planning issue is never rendered as a shipped capability
 
 ## E — Entities / Handoff Objects
 
@@ -90,3 +90,4 @@ This issue governs what Arena says about itself. It creates no technical capabil
 | Date | Divergence | Artifact update | Code/test update |
 |---|---|---|---|
 | 2026-08-05 | Generated from plan/backlog.yaml (ready) | initial | n/a |
+| 2026-08-17 | DISCOVER staleness: partially built — landing-page honesty checks existed in-suite and README carried a no-claims paragraph, but nothing linted the other public surfaces and no release-state banner existed. tools/claims_lint.py covers 5 surfaces (README, QUICKSTART, tutorials, web/static html) with 8 banned assertive patterns, negation-awareness (disclosure sentences legitimately contain the banned words), and a hostname allowlist (the Railway domain contains "production"). The suite includes a bite-test: a doctored copy with an assertive claim must fail the lint. Release-state banner added to README citing the suite + CI as evidence per T-095. | DoD checked; this row | tools/claims_lint.py; README banner; CI step added; tests +3, suite 89→92. Executed as graph node F4 (branch node/F4-claims-discipline). |

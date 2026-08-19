@@ -225,6 +225,30 @@ check("T-006 unprefixed arena namespace fails the schema itself",
       "extensions-unprefixed-namespace.yaml: fails with declared diagnostic"
       in _va_out.stdout)
 
+print("claims discipline (F4: T-094 T-095)")
+_cl = _sp.run([sys.executable, str(ROOT / "tools" / "claims_lint.py")],
+              capture_output=True, text=True, cwd=ROOT)
+check("T-094 no public surface makes an assertive audit/mainnet/production claim",
+      _cl.returncode == 0 and "CLAIMS LINT PASS" in _cl.stdout)
+check("T-095 release-state banner cites the suite and CI as evidence",
+      "**Release state:**" in (ROOT / "README.md").read_text()
+      and "banner + disclosures present" in _cl.stdout)
+# The lint must actually bite: a doctored surface with an assertive claim fails.
+import tempfile as _tf, shutil as _sh
+with _tf.TemporaryDirectory(dir=ROOT / "tests") as _td:
+    _copy = Path(_td) / "repo"
+    for _item in ("README.md", "QUICKSTART.md", "tutorials", "web", "tools"):
+        _src = ROOT / _item
+        (_sh.copytree(_src, _copy / _item) if _src.is_dir()
+         else (_copy.mkdir(parents=True, exist_ok=True),
+               _sh.copy(_src, _copy / _item)))
+    _r = _copy / "README.md"
+    _r.write_text(_r.read_text() + "\nThe arena is fully audited and production ready.\n")
+    _doctored = _sp.run([sys.executable, str(_copy / "tools" / "claims_lint.py")],
+                        capture_output=True, text=True)
+    check("T-094 the lint bites: a doctored assertive claim fails the build",
+          _doctored.returncode == 1 and "T-094" in _doctored.stdout)
+
 print("one-way canonicality (F3: T-092 T-093)")
 import hashlib as _hl
 import re as _re093
