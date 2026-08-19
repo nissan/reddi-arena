@@ -81,6 +81,67 @@ check("T-012 depth-20 chain refused identically (no recursion, no weighing)",
 check("T-012 depth-1 chain delegates to the normal draft decision",
       evaluate_hire_chain(DEF, [MERC], "Beetleweight").allowed)
 
+print("bounded execution lane (B1: T-019 T-020 T-021 T-022)")
+import copy as _cp
+from core.lane import ExecutionLane, find_tool
+
+_lane = ExecutionLane(DEF)
+# T-019 — an undeclared tool cannot be invoked; a skill-disguised capability
+# hits the same wall (runtime half of A6 vector 4).
+_r19 = _lane.invoke("hiddenProbe")
+check("T-019 undeclared tool refused at the lane",
+      not _r19["allowed"] and _r19["reason"] == "undeclared-tool")
+
+# T-020 — declared but not policy-matched cannot be invoked.
+_nopol = _cp.deepcopy(DEF)
+_nopol["harness"]["policies"] = [
+    p for p in _nopol["harness"]["policies"]
+    if p.get("resource") != "tool:vaultSeal"]
+_r20 = ExecutionLane(_nopol).invoke("vaultSeal")
+check("T-020 declared tool without matching policy refused",
+      not _r20["allowed"] and _r20["reason"] == "no-matching-policy")
+_denied = _cp.deepcopy(DEF)
+_denied["harness"]["policies"].append({
+    "id": "pol-deny-seal", "capability": "tool", "subject": _lane.subject,
+    "resource": "tool:vaultSeal", "action": "invoke", "effect": "deny",
+    "scope": {"type": "task", "value": "arena-match"},
+    "enforcement": {"target": "policy-engine", "phase": "before-execution"}})
+check("T-020 matching deny policy wins over allow",
+      ExecutionLane(_denied).invoke("vaultSeal")["reason"] == "denied-by-policy")
+
+# T-021 — egress with an empty allowlist is refused and logged.
+_r21 = _lane.request_egress("api.example.com")
+check("T-021 egress refused on empty allowlist and logged",
+      not _r21["allowed"] and "egress-refused" in _r21["reason"]
+      and _r21 in _lane.events)
+
+# Bounded: policy maxInvocations is enforced (probe cap is 12).
+_cap_lane = ExecutionLane(DEF)
+_probe_id = find_tool(DEF, "probe")
+_cap_results = [_cap_lane.invoke(_probe_id) for _ in range(13)]
+check("B1 policy maxInvocations bounds repeated invocation",
+      all(r["allowed"] for r in _cap_results[:12])
+      and _cap_results[12]["reason"] == "invocation-limit-exceeded")
+
+# T-022 — every decision event carries subject, resource, action, reason;
+# an authorized invocation is evented too.
+_ok = ExecutionLane(DEF).invoke("vaultSeal")
+check("T-022 authorized invocation emits a complete event",
+      _ok["allowed"] and all(k in _ok for k in
+                             ("subject", "resource", "action", "reason")))
+check("T-022 every refusal event is complete",
+      all(all(k in e for k in ("subject", "resource", "action", "reason"))
+          for e in _lane.events + _cap_lane.events))
+
+# Integration — match capability use routes through the lanes and lands in the
+# trace as evidence; reference docs are fully policied so everything is allowed.
+_evtrace = run_vault_match(DEF, RAID, seed=2)
+_all_events = [e for evs in _evtrace["laneEvents"].values() for e in evs]
+check("B1 match trace records lane events for both competitors",
+      len(_evtrace["laneEvents"]) == 2 and len(_all_events) > 0)
+check("B1 reference documents pass the lane on every match invocation",
+      all(e["allowed"] for e in _all_events))
+
 print("anti-gaming review (A6: T-013 T-014)")
 import copy as _cp
 from weigh_in import weigh as _weigh

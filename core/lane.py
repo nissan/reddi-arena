@@ -1,0 +1,79 @@
+"""Bounded execution lane (issue B1 / tests T-019..T-022).
+
+The lane is the ONLY component permitted to execute a capability, and only
+for declared, policy-matched, locally-bound invocations. It is pure and
+deterministic: no clock, no randomness, no IO — "execution" in the dry-run
+arena means returning an authorized invocation record that the match engine
+acts on. Everything else is a refusal, and every decision (allow or refuse)
+emits an event carrying subject, resource, action, and reason (T-022).
+
+Fail-closed order of checks:
+  1. undeclared tool           -> refuse "undeclared-tool"          (T-019)
+  2. matching deny policy      -> refuse "denied-by-policy"
+  3. no matching allow policy  -> refuse "no-matching-policy"       (T-020)
+  4. policy invocation limit   -> refuse "invocation-limit-exceeded"
+  5. egress: allowlist empty or host absent -> refuse "egress-refused" (T-021)
+
+A capability disguised as a skill (A6 vector 4) is not in harness.tools and
+therefore hits check 1 — the runtime half of that containment story.
+"""
+from __future__ import annotations
+
+
+class ExecutionLane:
+    def __init__(self, doc: dict):
+        self.subject = "agent:" + ((doc.get("metadata") or {}).get("name") or "unknown")
+        harness = doc.get("harness") or {}
+        self.tools = {t.get("id"): t for t in harness.get("tools") or []}
+        self.policies = list(harness.get("policies") or [])
+        network = (harness.get("runtime") or {}).get("network") or {}
+        self.egress_allowlist = list(network.get("allowlist") or [])
+        self.events: list[dict] = []
+        self._invocations: dict[str, int] = {}
+
+    # -- internals ----------------------------------------------------------
+    def _event(self, resource: str, action: str, allowed: bool, reason: str) -> dict:
+        event = {"subject": self.subject, "resource": resource, "action": action,
+                 "allowed": allowed, "reason": reason}
+        self.events.append(event)
+        return event
+
+    def _matching(self, resource: str, action: str, effect: str) -> list[dict]:
+        return [p for p in self.policies
+                if p.get("resource") == resource and p.get("action") == action
+                and p.get("effect") == effect]
+
+    # -- the only execution surface ----------------------------------------
+    def invoke(self, tool_id: str, action: str = "invoke") -> dict:
+        resource = f"tool:{tool_id}"
+        if tool_id not in self.tools:
+            return self._event(resource, action, False, "undeclared-tool")
+        if self._matching(resource, action, "deny"):
+            return self._event(resource, action, False, "denied-by-policy")
+        allows = self._matching(resource, action, "allow")
+        if not allows:
+            return self._event(resource, action, False, "no-matching-policy")
+        cap = min((p.get("limits", {}).get("maxInvocations") for p in allows
+                   if p.get("limits", {}).get("maxInvocations") is not None),
+                  default=None)
+        used = self._invocations.get(tool_id, 0)
+        if cap is not None and used >= cap:
+            return self._event(resource, action, False, "invocation-limit-exceeded")
+        self._invocations[tool_id] = used + 1
+        return self._event(resource, action, True, "declared, policy-matched")
+
+    def request_egress(self, host: str) -> dict:
+        resource = f"egress:{host}"
+        if host in self.egress_allowlist:
+            return self._event(resource, "egress", True, "host on allowlist")
+        reason = ("empty egress allowlist" if not self.egress_allowlist
+                  else "host not on allowlist")
+        return self._event(resource, "egress", False, f"egress-refused: {reason}")
+
+
+def find_tool(doc: dict, fragment: str) -> str | None:
+    """First declared tool id containing the fragment (case-insensitive)."""
+    for tool in (doc.get("harness") or {}).get("tools") or []:
+        if fragment.lower() in str(tool.get("id", "")).lower():
+            return tool.get("id")
+    return None

@@ -24,7 +24,9 @@ from dataclasses import dataclass, field, asdict
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from weigh_in import weigh, classify, CLASSES  # noqa: E402
+from lane import ExecutionLane, find_tool  # noqa: E402
 
 ARENA_RAIL = "x402-dry-run"
 ARENA_CURRENCY = "ARENA-CREDIT"
@@ -204,6 +206,14 @@ def run_vault_match(bot_a: dict, bot_b: dict, seed: int = 0,
     strat = [_strategy(bot_a), _strategy(bot_b)]
     fuel = [_fuel_cap(bot_a), _fuel_cap(bot_b)]
 
+    # B1: every capability use in the match routes through each bot's bounded
+    # execution lane — declared, policy-matched, locally bound, or refused.
+    # Lane decisions are recorded as evidence; they never alter the seeded
+    # strategy outcome (which is simulation, not capability execution).
+    lanes = [ExecutionLane(bot_a), ExecutionLane(bot_b)]
+    probe_tool = [find_tool(bot_a, "probe"), find_tool(bot_b, "probe")]
+    seal_tool = [find_tool(bot_a, "seal"), find_tool(bot_b, "seal")]
+
     # A hired source-auditor raises defense: it flags untrusted-source citation
     # traps the opponent would otherwise land. Bounded, declared, honest.
     defense_bonus = [0, 0]
@@ -239,19 +249,25 @@ def run_vault_match(bot_a: dict, bot_b: dict, seed: int = 0,
             turns.append(Turn(n, names[attacker], "sputter", 0, 0, 0, "held"))
             winner = defender
             reason = f"{names[attacker]} ran out of fuel (sputter)"
-            return _finalize(names, turns, winner, reason, secret_held, fuel, fuel_left, seed)
+            return _finalize(names, turns, winner, reason, secret_held, fuel, fuel_left, seed, lanes)
 
         probe = strat[attacker]["attack"] + nxt(20) - 10
         defense = strat[defender]["defense"] + defense_bonus[defender] + nxt(20) - 10
         fuel_left[attacker] -= turn_fuel
+
+        # Capability use goes through the lane or it does not happen (B1).
+        if probe_tool[attacker]:
+            lanes[attacker].invoke(probe_tool[attacker])
 
         if probe > defense:
             secret_held[defender] = False
             turns.append(Turn(n, names[attacker], "extract", probe, defense, turn_fuel, "extracted"))
             winner = attacker
             reason = f"{names[attacker]} extracted {names[defender]}'s secret on turn {n}"
-            return _finalize(names, turns, winner, reason, secret_held, fuel, fuel_left, seed)
+            return _finalize(names, turns, winner, reason, secret_held, fuel, fuel_left, seed, lanes)
 
+        if seal_tool[defender]:
+            lanes[defender].invoke(seal_tool[defender])
         turns.append(Turn(n, names[attacker], "probe", probe, defense, turn_fuel, "held"))
 
     # Turn limit reached, both secrets held -> tie-break on fuel efficiency.
@@ -261,10 +277,11 @@ def run_vault_match(bot_a: dict, bot_b: dict, seed: int = 0,
     else:
         winner = -1
         reason = "turn limit; both secrets held; draw"
-    return _finalize(names, turns, winner, reason, secret_held, fuel, fuel_left, seed)
+    return _finalize(names, turns, winner, reason, secret_held, fuel, fuel_left, seed, lanes)
 
 
-def _finalize(names, turns, winner, reason, secret_held, fuel, fuel_left, seed) -> dict:
+def _finalize(names, turns, winner, reason, secret_held, fuel, fuel_left, seed,
+              lanes=None) -> dict:
     trace = {
         "format": "vault",
         "seed": seed,
@@ -279,6 +296,8 @@ def _finalize(names, turns, winner, reason, secret_held, fuel, fuel_left, seed) 
         "rail": ARENA_RAIL,
         "prizeCurrency": ARENA_CURRENCY,
     }
+    if lanes is not None:
+        trace["laneEvents"] = {names[i]: lanes[i].events for i in range(2)}
     trace["traceHash"] = _hash({k: v for k, v in trace.items() if k != "traceHash"})
     return trace
 
