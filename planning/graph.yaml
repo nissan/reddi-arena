@@ -343,7 +343,7 @@ nodes:
 - id: B1
   type: implementation
   title: Build the bounded execution lane
-  status: ready
+  status: done
   objective: Execution is the one place the declaration becomes action, so it is the one place
     fail-closed must be provably enforced.
   epic: E04
@@ -375,6 +375,11 @@ nodes:
     - test-output
     - pr-review
     - spdd artifact (spdd/prompt/*-b1-*.md) Sync Log updated
+    recorded:
+    - 'PR #49 (merged 2026-08-21, closes #9): core/lane.py ExecutionLane (fail-closed
+      T-019..T-022 + maxInvocations bound), match integration with hash-covered
+      trace.laneEvents, suite 92->101 green pre/post rebase; A6 skill-disguise
+      vector proven uninvocable at runtime.'
   boundary: The lane is the ONLY component permitted to execute, and only for declared, policy-matched,
     locally-bound capabilities.
   surfaces:
@@ -387,7 +392,7 @@ nodes:
 - id: B2
   type: implementation
   title: Implement the turn loop and match lifecycle
-  status: blocked
+  status: ready
   objective: Deterministic lifecycle is the precondition for replayable evidence.
   epic: E04
   lane: SL-B
@@ -423,7 +428,7 @@ nodes:
 - id: B3
   type: implementation
   title: Provider abstraction across declared model providers
-  status: blocked
+  status: ready
   objective: Provider neutrality is an ADL promise; the Arena is where it either holds or
     visibly breaks.
   epic: E04
