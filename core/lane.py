@@ -8,6 +8,7 @@ acts on. Everything else is a refusal, and every decision (allow or refuse)
 emits an event carrying subject, resource, action, and reason (T-022).
 
 Fail-closed order of checks:
+  0. binding escape (E1I)      -> refuse "binding-mismatch"         (T-077)
   1. undeclared tool           -> refuse "undeclared-tool"          (T-019)
   2. matching deny policy      -> refuse "denied-by-policy"
   3. no matching allow policy  -> refuse "no-matching-policy"       (T-020)
@@ -21,7 +22,13 @@ from __future__ import annotations
 
 
 class ExecutionLane:
-    def __init__(self, doc: dict):
+    def __init__(self, doc: dict, bound_hash: str | None = None,
+                 live_hash: str | None = None):
+        """bound_hash: capability hash from the weigh-in certificate this lane
+        is bound to. live_hash: hash recomputed from the document actually
+        being fielded. A mismatch is an escape attempt (E1I): the lane emits a
+        binding refusal and refuses every subsequent invocation — a bot cannot
+        be weighed in one configuration and fielded in another (T-077)."""
         self.subject = "agent:" + ((doc.get("metadata") or {}).get("name") or "unknown")
         harness = doc.get("harness") or {}
         self.tools = {t.get("id"): t for t in harness.get("tools") or []}
@@ -30,6 +37,14 @@ class ExecutionLane:
         self.egress_allowlist = list(network.get("allowlist") or [])
         self.events: list[dict] = []
         self._invocations: dict[str, int] = {}
+        self.bound_hash = bound_hash
+        self.escaped = (bound_hash is not None and live_hash is not None
+                        and bound_hash != live_hash)
+        if bound_hash is not None:
+            self._event("declaration", "bind", not self.escaped,
+                        "bound to weighed certificate" if not self.escaped else
+                        "binding-mismatch: fielded document differs from "
+                        "weighed certificate")
 
     # -- internals ----------------------------------------------------------
     def _event(self, resource: str, action: str, allowed: bool, reason: str) -> dict:
@@ -46,6 +61,8 @@ class ExecutionLane:
     # -- the only execution surface ----------------------------------------
     def invoke(self, tool_id: str, action: str = "invoke") -> dict:
         resource = f"tool:{tool_id}"
+        if self.escaped:
+            return self._event(resource, action, False, "binding-mismatch")
         if tool_id not in self.tools:
             return self._event(resource, action, False, "undeclared-tool")
         if self._matching(resource, action, "deny"):
