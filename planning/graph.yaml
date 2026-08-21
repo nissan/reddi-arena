@@ -1103,7 +1103,7 @@ nodes:
 - id: E1I
   type: implementation
   title: Enforce runtime binding against the weighed declaration
-  status: blocked
+  status: ready
   objective: This single control is what makes weight class meaningful and makes ADL a contract
     rather than documentation.
   epic: E13
