@@ -535,6 +535,32 @@ check("email masking keeps domain, hides local part",
       _srv.mask_email("player@example.com") == "pl***@example.com")
 _httpd.shutdown()
 
+print("signup email (Resend, env-gated)")
+# The server module was loaded with no RESEND_* env, so the earlier signup
+# test above already proves the no-email path: signup succeeded with zero
+# network egress. The builder is pure — test it directly.
+check("no from address -> no emails built",
+      _srv.build_waitlist_emails("a@b.co", 1, ["compete"], "", "ops@b.co") == [])
+_msgs = _srv.build_waitlist_emails(
+    "player@example.com", 3, ["compete", "build"],
+    "Reddi Arena <arena@example.com>", "")
+check("from only -> one confirmation to the signee",
+      len(_msgs) == 1 and _msgs[0]["to"] == ["player@example.com"])
+check("confirmation states position, roles, dry-run rail, and removal path",
+      "position 3" in _msgs[0]["text"] and "compete, build" in _msgs[0]["text"]
+      and "no real money" in _msgs[0]["text"]
+      and "never sold or shared" in _msgs[0]["text"]
+      and "removed" in _msgs[0]["text"])
+_both = _srv.build_waitlist_emails(
+    "player@example.com", 3, ["compete"],
+    "Reddi Arena <arena@example.com>", "ops@example.com")
+check("from + notify -> confirmation plus operator notice",
+      len(_both) == 2 and _both[1]["to"] == ["ops@example.com"]
+      and "player@example.com" in _both[1]["text"])
+check("send is a no-op without both key and from address",
+      _srv.send_waitlist_emails("a@b.co", 1, ["compete"]) is None
+      and _srv.RESEND_API_KEY == "" and _srv.RESEND_FROM == "")
+
 print()
 print(f"{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)
