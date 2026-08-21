@@ -11,10 +11,10 @@ Execution is the one place the declaration becomes action, so it is the one plac
 
 **DoD checklist:**
 
-- [ ] A tool absent from the ADL cannot be invoked
-- [ ] A tool present but lacking a matching policyRef cannot be invoked
-- [ ] Network egress with an empty allowlist is refused and logged
-- [ ] Every refusal emits an event with subject, resource, action, and reason
+- [x] A tool absent from the ADL cannot be invoked
+- [x] A tool present but lacking a matching policyRef cannot be invoked
+- [x] Network egress with an empty allowlist is refused and logged
+- [x] Every refusal emits an event with subject, resource, action, and reason
 
 ## E — Entities / Handoff Objects
 
@@ -94,3 +94,4 @@ The lane is the ONLY component permitted to execute, and only for declared, poli
 | Date | Divergence | Artifact update | Code/test update |
 |---|---|---|---|
 | 2026-08-05 | Generated from plan/backlog.yaml (ready) | initial | n/a |
+| 2026-08-19 | DISCOVER staleness: greenfield — no invocation surface existed at all; the match engine is pure seeded simulation. B1's honest scope in the dry-run arena: core/lane.py ExecutionLane as the ONLY capability-invocation gate (fail-closed order: undeclared → denied-by-policy → no-matching-policy → invocation-limit → egress-refused; every decision evented with subject/resource/action/reason), plus engine integration routing each match's probe/seal tool uses through per-bot lanes into trace.laneEvents. Deliberate scope line: lane decisions are recorded evidence and never alter the seeded strategy outcome — outcome-coupling belongs to E1I (runtime binding to the weighed certificate), not B1. Bonus: policy limits.maxInvocations is enforced (the "bounded" in bounded execution), and the skill-disguised capability from A6 vector 4 now provably cannot be invoked (T-019). T-021's network-isolated CI job is satisfied by construction: the lane refuses egress before any IO exists to isolate. | DoD checked; this row | core/lane.py; engine integration (laneEvents in trace, hash-covered); tests +9 (T-019 ×1, T-020 ×2, T-021 ×1, bounds ×1, T-022 ×2, integration ×2), suite 92→101. Executed as graph node B1 (branch node/B1-bounded-execution-lane). |
