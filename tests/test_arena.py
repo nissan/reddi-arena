@@ -419,6 +419,61 @@ check("landing explains what happens to the email",
 check("landing discloses simulated (not live-model) competitors",
       "declared strategy profiles" in _land)
 
+print("waitlist admin endpoints")
+import importlib.util as _ilu
+import os as _os
+import tempfile as _tempfile
+import threading as _threading
+import urllib.error as _uerror
+import urllib.request as _urequest
+import json as _wjson
+
+_os.environ["DATA_DIR"] = _tempfile.mkdtemp(prefix="arena-waitlist-test-")
+_os.environ["ARENA_ADMIN_TOKEN"] = "test-token-123"
+_spec = _ilu.spec_from_file_location("arena_server", ROOT / "web" / "server.py")
+_srv = _ilu.module_from_spec(_spec)
+_spec.loader.exec_module(_srv)
+
+from http.server import ThreadingHTTPServer as _TServer
+_httpd = _TServer(("127.0.0.1", 0), _srv.Handler)
+_port = _httpd.server_address[1]
+_threading.Thread(target=_httpd.serve_forever, daemon=True).start()
+
+
+def _req(method, path, body=None, token=None):
+    r = _urequest.Request(f"http://127.0.0.1:{_port}{path}", method=method,
+                          data=_wjson.dumps(body).encode() if body is not None else None)
+    if token:
+        r.add_header("Authorization", "Bearer " + token)
+    if body is not None:
+        r.add_header("Content-Type", "application/json")
+    try:
+        resp = _urequest.urlopen(r, timeout=10)
+        return resp.status, _wjson.loads(resp.read())
+    except _uerror.HTTPError as e:
+        return e.code, _wjson.loads(e.read())
+
+
+_s, _b = _req("POST", "/api/waitlist", {"email": "Player@Example.com", "roles": ["compete"]})
+check("waitlist signup works and normalizes case", _s == 200 and _b["ok"] and _b["position"] == 1)
+_s, _b = _req("GET", "/api/waitlist")
+check("waitlist read without token is 404 (fail closed)", _s == 404)
+_s, _b = _req("GET", "/api/waitlist", token="wrong-token")
+check("waitlist read with wrong token is 404", _s == 404)
+_s, _b = _req("POST", "/api/waitlist/remove", {"email": "player@example.com"})
+check("waitlist remove without token is 404", _s == 404)
+_s, _b = _req("GET", "/api/waitlist", token="test-token-123")
+check("waitlist read with token returns entries",
+      _s == 200 and _b["count"] == 1 and _b["entries"][0]["email"] == "player@example.com")
+_s, _b = _req("POST", "/api/waitlist/remove", {"email": "player@example.com"},
+              token="test-token-123")
+check("waitlist remove with token deletes the entry", _s == 200 and _b["removed"] == 1)
+_s, _b = _req("GET", "/api/waitlist", token="test-token-123")
+check("waitlist empty after removal", _s == 200 and _b["count"] == 0)
+check("email masking keeps domain, hides local part",
+      _srv.mask_email("player@example.com") == "pl***@example.com")
+_httpd.shutdown()
+
 print()
 print(f"{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)
