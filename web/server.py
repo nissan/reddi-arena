@@ -7,8 +7,10 @@ here; it only marshals JSON. Stdlib only (http.server) so it runs anywhere with
 no install.
 
 Boundaries carry through from the core: dry-run rail, ARENA-CREDIT prizes,
-provisional x-arena.price. This server does not call any model provider, touch
-any wallet, or reach any network.
+provisional x-arena.price. This server does not call any model provider or
+touch any wallet. Its only outbound network call is the optional signup email
+via Resend — entirely env-gated (RESEND_API_KEY/RESEND_FROM) and absent by
+default, so a bare deploy still reaches no network.
 """
 
 from __future__ import annotations
@@ -18,6 +20,8 @@ import hmac
 import json
 import os
 import sys
+import threading
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -50,6 +54,72 @@ ADMIN_TOKEN = os.environ.get("ARENA_ADMIN_TOKEN", "")
 def mask_email(email):
     local, _, domain = email.partition("@")
     return (local[:2] + "***@" + domain) if domain else "***"
+
+
+# Optional Resend-backed email on new signups. With RESEND_API_KEY or
+# RESEND_FROM unset, no email is attempted and no network is reached — signup
+# behaves exactly as before. Sending is best-effort in a background thread; a
+# Resend failure can never fail or delay the signup response.
+RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
+RESEND_FROM = os.environ.get("RESEND_FROM", "")  # e.g. "Reddi Arena <arena@example.com>"
+WAITLIST_NOTIFY_EMAIL = os.environ.get("WAITLIST_NOTIFY_EMAIL", "")
+
+
+def build_waitlist_emails(email, position, roles, from_addr, notify_addr):
+    """Pure builder for the Resend payloads a new signup produces."""
+    msgs = []
+    if from_addr:
+        msgs.append({
+            "from": from_addr,
+            "to": [email],
+            "subject": "You're on the Reddi Arena early-access list",
+            "text": (
+                f"You're in — position {position} on the Reddi Arena "
+                f"early-access waitlist (roles: {', '.join(roles)}).\n\n"
+                "While you wait:\n"
+                "- Watch a match and browse the mercenary market: "
+                "https://reddi-arena-production.up.railway.app/play\n"
+                "- Read the spec your bot will be written in: "
+                "https://agent-protocol.reddi.tech/spec\n\n"
+                "Prizes are ARENA-CREDIT on the dry-run rail — no real money. "
+                "Your address is used only for early-access updates, never "
+                "sold or shared; reply to this email to be removed."
+            ),
+        })
+        if notify_addr:
+            msgs.append({
+                "from": from_addr,
+                "to": [notify_addr],
+                "subject": f"[arena] waitlist signup #{position}",
+                "text": (f"New early-access signup: {email}\n"
+                         f"roles: {', '.join(roles)}\n"
+                         f"position: {position}"),
+            })
+    return msgs
+
+
+def send_waitlist_emails(email, position, roles):
+    if not (RESEND_API_KEY and RESEND_FROM):
+        return
+    payloads = build_waitlist_emails(
+        email, position, roles, RESEND_FROM, WAITLIST_NOTIFY_EMAIL)
+
+    def _send():
+        for p in payloads:
+            try:
+                req = urllib.request.Request(
+                    "https://api.resend.com/emails",
+                    data=json.dumps(p).encode(),
+                    headers={"Authorization": f"Bearer {RESEND_API_KEY}",
+                             "Content-Type": "application/json"})
+                urllib.request.urlopen(req, timeout=10)
+                print(f"[waitlist] email sent to {mask_email(p['to'][0])}",
+                      flush=True)
+            except Exception as exc:  # best-effort: log, never raise
+                print(f"[waitlist] email to {mask_email(p['to'][0])} "
+                      f"failed: {exc}", flush=True)
+
+    threading.Thread(target=_send, daemon=True).start()
 
 
 def bots():
@@ -196,6 +266,8 @@ class Handler(BaseHTTPRequestHandler):
                 entries.append({"email": email, "roles": req.get("roles") or ["compete"]})
                 pos = len(entries)
             json.dump(entries, open(WAITLIST, "w"), indent=2)
+            if existing is None:  # confirmation email on first signup only
+                send_waitlist_emails(email, pos, req.get("roles") or ["compete"])
             # Masked signup line for the host's deploy logs, so the operator
             # sees activity without polling the file. Full addresses stay in
             # waitlist.json only ("never sold or shared" landing promise).
