@@ -197,7 +197,8 @@ class Turn:
 
 def run_vault_match(bot_a: dict, bot_b: dict, seed: int = 0,
                     hire_a: dict | None = None, hire_b: dict | None = None,
-                    max_turns: int = 12) -> dict:
+                    max_turns: int = 12,
+                    cert_a: dict | None = None, cert_b: dict | None = None) -> dict:
     """
     Deterministic Vault match. Given identical inputs and seed, always returns
     an identical result and trace. This is the substrate the replay renders.
@@ -210,7 +211,28 @@ def run_vault_match(bot_a: dict, bot_b: dict, seed: int = 0,
     # execution lane — declared, policy-matched, locally bound, or refused.
     # Lane decisions are recorded as evidence; they never alter the seeded
     # strategy outcome (which is simulation, not capability execution).
-    lanes = [ExecutionLane(bot_a), ExecutionLane(bot_b)]
+    #
+    # E1I: each lane is bound to the capability hash that was WEIGHED IN
+    # (cert_a/cert_b from the draft; self-weighed when not provided). A
+    # fielded document that no longer matches its certificate is an escape
+    # attempt: the escaping bot forfeits before any turn runs (T-078), with
+    # the binding refusal recorded as evidence.
+    live_certs = [weigh(bot_a), weigh(bot_b)]
+    bound_certs = [cert_a or live_certs[0], cert_b or live_certs[1]]
+    bound_hashes = [c["capabilityHash"] for c in bound_certs]
+    lanes = [ExecutionLane(bot_a, bound_hashes[0], live_certs[0]["capabilityHash"]),
+             ExecutionLane(bot_b, bound_hashes[1], live_certs[1]["capabilityHash"])]
+    if lanes[0].escaped or lanes[1].escaped:
+        if lanes[0].escaped and lanes[1].escaped:
+            winner, reason = -1, ("both fielded documents differ from their "
+                                  "weighed certificates; match void")
+        else:
+            escapee = 0 if lanes[0].escaped else 1
+            winner = 1 - escapee
+            reason = (f"{names[escapee]} forfeits: fielded document does not "
+                      f"match its weighed certificate (binding escape)")
+        return _finalize(names, [], winner, reason, [True, True], fuel,
+                         list(fuel), seed, lanes, bound_hashes)
     probe_tool = [find_tool(bot_a, "probe"), find_tool(bot_b, "probe")]
     seal_tool = [find_tool(bot_a, "seal"), find_tool(bot_b, "seal")]
 
@@ -249,7 +271,7 @@ def run_vault_match(bot_a: dict, bot_b: dict, seed: int = 0,
             turns.append(Turn(n, names[attacker], "sputter", 0, 0, 0, "held"))
             winner = defender
             reason = f"{names[attacker]} ran out of fuel (sputter)"
-            return _finalize(names, turns, winner, reason, secret_held, fuel, fuel_left, seed, lanes)
+            return _finalize(names, turns, winner, reason, secret_held, fuel, fuel_left, seed, lanes, bound_hashes)
 
         probe = strat[attacker]["attack"] + nxt(20) - 10
         defense = strat[defender]["defense"] + defense_bonus[defender] + nxt(20) - 10
@@ -264,7 +286,7 @@ def run_vault_match(bot_a: dict, bot_b: dict, seed: int = 0,
             turns.append(Turn(n, names[attacker], "extract", probe, defense, turn_fuel, "extracted"))
             winner = attacker
             reason = f"{names[attacker]} extracted {names[defender]}'s secret on turn {n}"
-            return _finalize(names, turns, winner, reason, secret_held, fuel, fuel_left, seed, lanes)
+            return _finalize(names, turns, winner, reason, secret_held, fuel, fuel_left, seed, lanes, bound_hashes)
 
         if seal_tool[defender]:
             lanes[defender].invoke(seal_tool[defender])
@@ -277,11 +299,11 @@ def run_vault_match(bot_a: dict, bot_b: dict, seed: int = 0,
     else:
         winner = -1
         reason = "turn limit; both secrets held; draw"
-    return _finalize(names, turns, winner, reason, secret_held, fuel, fuel_left, seed, lanes)
+    return _finalize(names, turns, winner, reason, secret_held, fuel, fuel_left, seed, lanes, bound_hashes)
 
 
 def _finalize(names, turns, winner, reason, secret_held, fuel, fuel_left, seed,
-              lanes=None) -> dict:
+              lanes=None, bound_hashes=None) -> dict:
     trace = {
         "format": "vault",
         "seed": seed,
@@ -298,6 +320,10 @@ def _finalize(names, turns, winner, reason, secret_held, fuel, fuel_left, seed,
     }
     if lanes is not None:
         trace["laneEvents"] = {names[i]: lanes[i].events for i in range(2)}
+    if bound_hashes is not None:
+        # E1I / T-079: every trace records the exact hash each lane was bound
+        # to, so a trace is auditable against its weigh-in certificates.
+        trace["boundHash"] = {names[i]: bound_hashes[i] for i in range(2)}
     trace["traceHash"] = _hash({k: v for k, v in trace.items() if k != "traceHash"})
     return trace
 

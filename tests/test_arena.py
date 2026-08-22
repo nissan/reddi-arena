@@ -142,6 +142,51 @@ check("B1 match trace records lane events for both competitors",
 check("B1 reference documents pass the lane on every match invocation",
       all(e["allowed"] for e in _all_events))
 
+print("runtime binding to the weighed declaration (E1I: T-077 T-078 T-079)")
+from weigh_in import weigh as _w_e1i
+
+# T-079 — every trace records the exact hash each lane was bound to, and it
+# matches the weigh-in certificate.
+_bt = run_vault_match(DEF, RAID, seed=2)
+check("T-079 trace bound hashes match the weigh-in certificates",
+      _bt["boundHash"][DEF["metadata"]["name"]] == _w_e1i(DEF)["capabilityHash"]
+      and _bt["boundHash"][RAID["metadata"]["name"]] == _w_e1i(RAID)["capabilityHash"])
+
+# T-077 — a capability absent from the weighed hash cannot execute: weigh the
+# honest document, then field a mutated one with a smuggled tool.
+_stale_cert = _w_e1i(DEF)
+_smuggled = _cp.deepcopy(DEF)
+_smuggled["harness"]["tools"].append({
+    "id": "smuggledProbe", "type": "function", "description": "post-weigh addition",
+    "sideEffects": {"mode": "none", "mutatesState": False, "external": False,
+                    "resources": []}})
+_esc_lane = ExecutionLane(_smuggled, _stale_cert["capabilityHash"],
+                          _w_e1i(_smuggled)["capabilityHash"])
+check("T-077 escaped lane refuses the smuggled capability",
+      _esc_lane.escaped
+      and _esc_lane.invoke("smuggledProbe")["reason"] == "binding-mismatch")
+check("T-077 escaped lane refuses even honestly-declared tools (fail-closed)",
+      _esc_lane.invoke("vaultSeal")["reason"] == "binding-mismatch")
+check("T-077 honest binding leaves the lane fully functional",
+      not ExecutionLane(DEF, _stale_cert["capabilityHash"],
+                        _stale_cert["capabilityHash"]).escaped)
+
+# T-078 — an escape attempt forfeits the match and records evidence.
+_forfeit = run_vault_match(_smuggled, RAID, seed=2, cert_a=_stale_cert)
+check("T-078 escape forfeits before any turn runs",
+      _forfeit["winner"] == RAID["metadata"]["name"]
+      and "binding escape" in _forfeit["reason"] and _forfeit["turns"] == [])
+check("T-078 the binding refusal is recorded as evidence in the trace",
+      any(e["action"] == "bind" and not e["allowed"]
+          for e in _forfeit["laneEvents"][DEF["metadata"]["name"]]))
+check("T-078 forfeit traces are deterministic",
+      run_vault_match(_smuggled, RAID, seed=2, cert_a=_stale_cert)["traceHash"]
+      == _forfeit["traceHash"])
+_both = run_vault_match(_smuggled, _cp.deepcopy(RAID), seed=2,
+                        cert_a=_stale_cert, cert_b=_w_e1i(DEF))
+check("T-078 both escaping voids the match as a draw",
+      _both["winner"] is None and "void" in _both["reason"])
+
 print("anti-gaming review (A6: T-013 T-014)")
 import copy as _cp
 from weigh_in import weigh as _weigh
