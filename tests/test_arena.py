@@ -561,6 +561,27 @@ check("send is a no-op without both key and from address",
       _srv.send_waitlist_emails("a@b.co", 1, ["compete"]) is None
       and _srv.RESEND_API_KEY == "" and _srv.RESEND_FROM == "")
 
+
+class _FakeHTTPError:
+    def __init__(self, body):
+        self._body = body
+
+    def read(self):
+        if self._body is None:
+            raise OSError("stream already consumed")
+        return self._body
+
+
+# A bare "HTTP Error 403: Forbidden" hides Resend's actual reason (unverified
+# domain, restricted key). The body is what makes a failure diagnosable.
+check("resend error detail surfaces the response body",
+      "domain is not verified" in _srv.resend_error_detail(
+          _FakeHTTPError(b'{"message":"The reddi.tech domain is not verified"}')))
+check("resend error detail truncates long bodies to 300 chars",
+      len(_srv.resend_error_detail(_FakeHTTPError(b"x" * 5000))) == 300)
+check("resend error detail never raises on an unreadable body",
+      _srv.resend_error_detail(_FakeHTTPError(None)) == "")
+
 print()
 print(f"{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)

@@ -21,6 +21,7 @@ import json
 import os
 import sys
 import threading
+import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -98,6 +99,16 @@ def build_waitlist_emails(email, position, roles, from_addr, notify_addr):
     return msgs
 
 
+def resend_error_detail(exc):
+    """Resend puts the actionable reason (unverified domain, bad key, rate
+    limit) in the response body; the bare status line says only "Forbidden".
+    Bodies carry no credentials, but truncate anyway."""
+    try:
+        return exc.read().decode("utf-8", "replace").strip()[:300]
+    except Exception:
+        return ""
+
+
 def send_waitlist_emails(email, position, roles):
     if not (RESEND_API_KEY and RESEND_FROM):
         return
@@ -114,6 +125,10 @@ def send_waitlist_emails(email, position, roles):
                              "Content-Type": "application/json"})
                 urllib.request.urlopen(req, timeout=10)
                 print(f"[waitlist] email sent to {mask_email(p['to'][0])}",
+                      flush=True)
+            except urllib.error.HTTPError as exc:  # log the reason, never raise
+                print(f"[waitlist] email to {mask_email(p['to'][0])} "
+                      f"failed: HTTP {exc.code} {resend_error_detail(exc)}",
                       flush=True)
             except Exception as exc:  # best-effort: log, never raise
                 print(f"[waitlist] email to {mask_email(p['to'][0])} "
