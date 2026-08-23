@@ -11,9 +11,9 @@ This single control is what makes weight class meaningful and makes ADL a contra
 
 **DoD checklist:**
 
-- [ ] A capability absent from the weighed hash cannot execute
-- [ ] An escape attempt forfeits the match with recorded evidence
-- [ ] The bound hash on the trace matches the weigh-in certificate exactly
+- [x] A capability absent from the weighed hash cannot execute
+- [x] An escape attempt forfeits the match with recorded evidence
+- [x] The bound hash on the trace matches the weigh-in certificate exactly
 
 ## E — Entities / Handoff Objects
 
@@ -91,3 +91,4 @@ Binding enforces the declaration. It does not evaluate whether the declaration w
 | Date | Divergence | Artifact update | Code/test update |
 |---|---|---|---|
 | 2026-08-05 | Generated from plan/backlog.yaml (ready) | initial | n/a |
+| 2026-08-21 | Built directly on B1: ExecutionLane gains bound_hash/live_hash construction — a mismatch marks the lane escaped, emits a binding refusal event, and every subsequent invocation (including honestly-declared tools) is refused fail-closed. run_vault_match accepts draft certificates (cert_a/cert_b; self-weighs when absent), forfeits the escaping bot BEFORE any turn runs with the refusal recorded as trace evidence, voids the match as a draw when both escape, and stamps trace.boundHash per bot (auditable against weigh-in certificates). This also completes T-014's runtime half from A6 (capability hidden post-weigh cannot execute). Note: baseline suite grew 101→109 mid-node from PR #48 (waitlist endpoints, merged without a graph node — classified as maintenance, flagged in retro). | DoD checked; this row | core/lane.py binding checks; core/arena.py cert params + forfeit path + boundHash; tests +8 (T-077 ×3, T-078 ×4, T-079 ×1), suite 109→117. Executed as graph node E1I (branch node/E1I-runtime-binding). |
