@@ -1103,7 +1103,7 @@ nodes:
 - id: E1I
   type: implementation
   title: Enforce runtime binding against the weighed declaration
-  status: ready
+  status: done
   objective: This single control is what makes weight class meaningful and makes ADL a contract
     rather than documentation.
   epic: E13
@@ -1132,6 +1132,13 @@ nodes:
     - test-output
     - pr-review
     - spdd artifact (spdd/prompt/*-e1i-*.md) Sync Log updated
+    recorded:
+    - 'PR #50 (merged 2026-08-23, closes #29): T-077/T-078/T-079 implemented — lane
+      binds bound_hash vs live_hash, escape refuses all invocations fail-closed,
+      escaping bot forfeits pre-turn with laneEvents evidence, trace boundHash
+      matches certificate; suite 109->117 for the node, re-verified green through
+      three main rebases (PR #48/#51/#52 baseline shifts, final suite 125); Sync
+      Log updated in-PR.'
   boundary: Binding enforces the declaration. It does not evaluate whether the declaration
     was wise.
   surfaces:
