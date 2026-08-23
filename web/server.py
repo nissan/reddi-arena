@@ -65,6 +65,11 @@ RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
 RESEND_FROM = os.environ.get("RESEND_FROM", "")  # e.g. "Reddi Arena <arena@example.com>"
 WAITLIST_NOTIFY_EMAIL = os.environ.get("WAITLIST_NOTIFY_EMAIL", "")
 
+# api.resend.com sits behind Cloudflare, which bans urllib's default
+# "Python-urllib/3.x" signature with HTTP 403 "error code: 1010" before the
+# request ever reaches Resend. A real User-Agent is required, not cosmetic.
+RESEND_USER_AGENT = "reddi-arena/1.0 (+https://github.com/nissan/reddi-arena)"
+
 
 def build_waitlist_emails(email, position, roles, from_addr, notify_addr):
     """Pure builder for the Resend payloads a new signup produces."""
@@ -99,6 +104,18 @@ def build_waitlist_emails(email, position, roles, from_addr, notify_addr):
     return msgs
 
 
+def resend_request(payload, api_key=None):
+    """Build the Resend send request, including the Cloudflare-safe UA."""
+    key = RESEND_API_KEY if api_key is None else api_key
+    return urllib.request.Request(
+        "https://api.resend.com/emails",
+        data=json.dumps(payload).encode(),
+        headers={"Authorization": f"Bearer {key}",
+                 "Content-Type": "application/json",
+                 "Accept": "application/json",
+                 "User-Agent": RESEND_USER_AGENT})
+
+
 def resend_error_detail(exc):
     """Resend puts the actionable reason (unverified domain, bad key, rate
     limit) in the response body; the bare status line says only "Forbidden".
@@ -118,12 +135,7 @@ def send_waitlist_emails(email, position, roles):
     def _send():
         for p in payloads:
             try:
-                req = urllib.request.Request(
-                    "https://api.resend.com/emails",
-                    data=json.dumps(p).encode(),
-                    headers={"Authorization": f"Bearer {RESEND_API_KEY}",
-                             "Content-Type": "application/json"})
-                urllib.request.urlopen(req, timeout=10)
+                urllib.request.urlopen(resend_request(p), timeout=10)
                 print(f"[waitlist] email sent to {mask_email(p['to'][0])}",
                       flush=True)
             except urllib.error.HTTPError as exc:  # log the reason, never raise

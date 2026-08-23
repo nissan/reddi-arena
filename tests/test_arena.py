@@ -627,6 +627,20 @@ check("resend error detail truncates long bodies to 300 chars",
 check("resend error detail never raises on an unreadable body",
       _srv.resend_error_detail(_FakeHTTPError(None)) == "")
 
+# Cloudflare fronts api.resend.com and bans urllib's default signature with
+# HTTP 403 "error code: 1010" before Resend ever sees the request. Caught by a
+# live smoke test; this locks the fix in.
+_rq = _srv.resend_request({"from": "a@b.co", "to": ["c@d.co"]}, api_key="test-key")
+_ua = _rq.get_header("User-agent") or ""
+check("resend request sends a real User-Agent, not Python-urllib",
+      "reddi-arena" in _ua and "Python-urllib" not in _ua)
+check("resend request carries bearer auth and json content type",
+      _rq.get_header("Authorization") == "Bearer test-key"
+      and _rq.get_header("Content-type") == "application/json")
+check("resend request posts the payload to the emails endpoint",
+      _rq.full_url == "https://api.resend.com/emails"
+      and b'"from": "a@b.co"' in _rq.data)
+
 print()
 print(f"{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)
