@@ -11,9 +11,9 @@ Deterministic lifecycle is the precondition for replayable evidence.
 
 **DoD checklist:**
 
-- [ ] Every match terminates in a defined terminal state
-- [ ] A crashed or hung competitor forfeits rather than hanging the match
-- [ ] Illegal state transitions are impossible, not merely discouraged
+- [x] Every match terminates in a defined terminal state
+- [x] A crashed or hung competitor forfeits rather than hanging the match
+- [x] Illegal state transitions are impossible, not merely discouraged
 
 ## E — Entities / Handoff Objects
 
@@ -91,3 +91,4 @@ Lifecycle events are evidence, not adjudication.
 | Date | Divergence | Artifact update | Code/test update |
 |---|---|---|---|
 | 2026-08-05 | Generated from plan/backlog.yaml (ready) | initial | n/a |
+| 2026-08-23 | Artifact staleness (DISCOVER): written before the engine existed. The turn loop, turn limit, and fuel model (O1/O2's substrate) already shipped with the playable preview; the deterministic engine cannot literally crash or hang, so O3's fault classes map to their deterministic analogues: a declaration the engine cannot read (crash) and one outside ARENA-PROFILE-v0.1's declared 0-100 strategy domain (runaway/hang). Node scope became: make the implicit lifecycle explicit and structurally closed. | this row | `core/lifecycle.py` (states/LEGAL/`advance()` raising `IllegalTransition`; terminal states absorbing); `core/arena.py` walks scheduled→weighing→binding→(in-progress→)terminal, fault-checked `_read_strategy`/`_read_fuel` resolve faults as pre-turn forfeit/void at binding, trace gains hash-covered `lifecycle`; suite 125→138 (T-023 ×3, T-024 ×5, T-025 ×5) |
