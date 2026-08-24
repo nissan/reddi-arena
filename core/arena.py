@@ -117,6 +117,10 @@ HIRE_DEPTH_CAP = 1
 # declare an unbounded advantage (audit E6/L3).
 DEFENSE_BONUS_CAP = 15
 
+# The known weight-class names (CLASSES is a list of (name, ceiling) pairs).
+# Used to validate a caller-supplied entered class before draft enforcement.
+CLASS_NAMES = frozenset(name for name, _ in CLASSES)
+
 
 def evaluate_hire_chain(competitor_doc: dict, chain: list[dict],
                         entered_class: str) -> DraftResult:
@@ -403,13 +407,33 @@ def run_vault_match(bot_a: dict, bot_b: dict, seed: int = 0,
     # an over-ceiling fielding forfeits before turn 1 (both illegal -> void). With
     # no entered class stated — internal parity/balance runs measuring hire effect
     # — the hire plays as before, so those results are unchanged.
+    #
+    # Precedence note: this gate follows the escape (365) and fault (382) gates,
+    # so a competitor whose opponent escapes/faults first wins before its own
+    # illegal fielding is evaluated. That is the intended "first terminal state
+    # wins" ordering — the illegal hire never plays, so it confers no advantage.
+    #
+    # entered_* is a TRUSTED control parameter (the arena operator's declared
+    # draft class), not a competitor document. An invalid class is a caller/config
+    # bug and must FAIL LOUDLY: mapping an unknown or mis-cased name to the
+    # ceiling-0 default would silently forfeit the employer with a trace
+    # indistinguishable from a genuine breach (audit review). It is validated
+    # against CLASSES before it can reach the ceiling lookup — this raise is a
+    # config error, distinct from the never-raise contract that governs the
+    # untrusted competitor documents.
     draft_faults = [None, None]
     for i, (bot, hire, entered) in enumerate(
             [(bot_a, hire_a, entered_a), (bot_b, hire_b, entered_b)]):
-        if isinstance(hire, dict) and entered is not None:
-            verdict = evaluate_hire(bot, hire, entered)
-            if not verdict.allowed:
-                draft_faults[i] = verdict.reason
+        if not isinstance(hire, dict) or entered is None:
+            continue
+        if not isinstance(entered, str) or entered not in CLASS_NAMES:
+            raise ValueError(
+                f"entered_{'ab'[i]}={entered!r} is not a known weight class "
+                f"{sorted(CLASS_NAMES)}; a valid entered class is required to "
+                f"enforce the draft ceiling")
+        verdict = evaluate_hire(bot, hire, entered)
+        if not verdict.allowed:
+            draft_faults[i] = verdict.reason
     if draft_faults[0] or draft_faults[1]:
         if draft_faults[0] and draft_faults[1]:
             winner = -1

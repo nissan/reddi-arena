@@ -102,6 +102,20 @@ check("E7/L2 both fielding illegal hires voids the match",
 _e7_legal = run_vault_match(DEF, RAID, seed=1, hire_a=MERC, entered_a="Beetleweight")
 check("E7/L2 a hire legal at the entered class is not a forfeit",
       _e7_legal["outcomeKind"] not in ("forfeit", "void"))
+# An unknown / mis-cased / whitespace / empty / non-string / unhashable entered
+# class is a caller error: it must raise LOUDLY, never map to a ceiling-0
+# silent forfeit that looks identical to a genuine breach (audit review MAJOR).
+def _e7_raises(bad):
+    try:
+        run_vault_match(DEF, RAID, seed=1, hire_a=MERC, entered_a=bad)
+        return False
+    except ValueError:
+        return True
+    except Exception:
+        return False  # a TypeError (unhashable) is NOT acceptable
+check("E7/L2 an invalid entered class raises loudly, never a silent forfeit",
+      all(_e7_raises(b) for b in
+          ["Nonexistent", "antweight", "Beetleweight ", "", 42, ["Antweight"], {"x": 1}]))
 
 print("conformance levels to league tiers (A7: T-015 T-016)")
 import copy as _cp_a7
