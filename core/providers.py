@@ -107,18 +107,31 @@ def select_provider(doc: dict, available: dict) -> dict:
             "considered": considered}
 
 
+def _is_num(x) -> bool:
+    return isinstance(x, (int, float)) and not isinstance(x, bool)
+
+
 def effective_doc(doc: dict, capabilities: dict) -> dict:
     """The document as constrained by a provider's capabilities: declared
     numeric requirements are capped at what the provider actually offers.
     This is the deterministic engine's provider-sensitive channel — a lower
-    provider contextWindow means less fuel on the scale."""
+    provider contextWindow means less fuel on the scale.
+
+    A provider that OMITS a numeric capability (or offers a non-numeric value)
+    offers NONE of it, so the requirement caps to 0 — consistent with
+    select_provider marking such an omission missing/degraded. Leaving it
+    uncapped (the old behavior) handed the bot its full declared requirement,
+    so a degraded provider produced the same effective fuel as a fully-capable
+    one and biased the divergence report to zero (audit T11)."""
     eff = copy.deepcopy(doc)
     requirements = ((eff.get("model") or {}).get("requirements") or {})
+    caps = capabilities or {}
     for req in _NUM_REQS:
         declared = requirements.get(req)
-        offered = (capabilities or {}).get(req)
-        if declared is not None and offered is not None:
-            requirements[req] = min(declared, offered)
+        if not _is_num(declared):
+            continue  # non-numeric declared: leave it for _read_fuel to fault
+        offered = caps.get(req)
+        requirements[req] = min(declared, offered if _is_num(offered) else 0)
     return eff
 
 

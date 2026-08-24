@@ -78,9 +78,16 @@ Reviewer verdict: FINDINGS (yellow). **Remediation status (2026-08-24):**
   entropy and already documented as a textual-detection limit. T10 — the
   single mask+scrub path is already the strictest (fail-closed); honoring an
   alternate `mode` needs the spec to define one, and mask-spoofing exposes no
-  secret. T11 — `effective_doc` capping omitted-capability providers changes
-  fuel and therefore match outcomes, so it moves to the land-last
-  outcome-changing batch with a BALANCE-REPORT regen. T12 — doc/assert nit.
+  secret. T12 — doc/assert nit.
+
+  **T11 landed** (`fix/provider-omission-cap`): `effective_doc` now caps an
+  omitted (or non-numeric) numeric capability to 0, consistent with
+  `select_provider` marking the omission missing/degraded — the old code left
+  it at the full declared value and biased divergence to zero. Turned out
+  outcome-neutral for the balance sweep (which never routes through
+  `effective_doc`/providers) and for the T-028 fixtures (all providers offer
+  their capabilities), so no BALANCE-REPORT regen was needed; only an omitting
+  provider table changes.
 
 | id | sev | finding | disposition |
 |---|---|---|---|

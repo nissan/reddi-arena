@@ -699,6 +699,22 @@ check("T-027 effective doc caps declared numerics at provider capability",
       effective_doc(DEF, {"contextWindow": 4000})["model"]["requirements"]
       ["contextWindow"] == 4000
       and DEF["model"]["requirements"]["contextWindow"] == 8000)
+# T11 (audit): a provider that OMITS a numeric capability (or offers a
+# non-numeric value) offers NONE of it, so the requirement caps to 0 — the old
+# code left it uncapped at the full declared value, so a degraded provider
+# produced the same effective fuel as a fully-capable one and biased divergence
+# to zero. Consistent with select_provider marking the omission missing.
+check("T11 an omitted provider capability caps the requirement to 0, not full",
+      effective_doc(DEF, {})["model"]["requirements"]["contextWindow"] == 0
+      and effective_doc(DEF, {"contextWindow": 4000})["model"]["requirements"]
+      .get("maxOutputTokens") == 0)
+check("T11 a non-numeric offered capability is treated as omitted (caps to 0)",
+      effective_doc(DEF, {"contextWindow": "lots"})["model"]["requirements"]
+      ["contextWindow"] == 0)
+from arena import _read_fuel as _rf_t11
+check("T11 an omitted capability floors effective fuel, surfacing divergence",
+      _rf_t11(effective_doc(DEF, {}))[0] == 2000
+      and _rf_t11(effective_doc(DEF, {"contextWindow": 200000}))[0] == 8000)
 
 # T-028 — cross-provider divergence is measured and published, not hidden.
 _rep = divergence_report(DEF, RAID, _AVAIL, range(10))
