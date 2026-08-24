@@ -1179,7 +1179,7 @@ nodes:
 - id: E2I
   type: implementation
   title: Detect undeclared-capability reliance
-  status: ready
+  status: done
   objective: The subtler cheat is not declaring a tool but relying on capacity beyond the
     declared envelope.
   epic: E13
@@ -1205,6 +1205,14 @@ nodes:
     - test-output
     - pr-review
     - spdd artifact (spdd/prompt/*-e2i-*.md) Sync Log updated
+    recorded:
+    - 'PR #57 (merged 2026-08-24, closes #30): T-080/T-081 implemented —
+      core/audit.py pure evidence audit (audit_match measures declared-vs-actual
+      from the trace alone: fuelAccounting utilization + laneEvents signals for
+      undeclared attempts, binding escapes, envelope exhaustion; flag_sustained
+      aggregates at published OVERRUN_TOLERANCE=3 with review-only dispositions,
+      no ban mechanism, asserted structurally); suite 164->174; E13 epic
+      complete (E1I binds, E2I detects); Sync Log records the re-scope.'
   boundary: Detection flags a discrepancy; adjudication is a separate human-reviewed step.
   surfaces:
     allow: *id005
