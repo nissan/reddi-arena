@@ -576,7 +576,7 @@ nodes:
 - id: B6
   type: implementation
   title: Implement Vault attack/defend scoring
-  status: ready
+  status: done
   objective: A format nobody can argue about is worth more than five ambiguous ones.
   epic: E06
   lane: SL-B
@@ -604,6 +604,15 @@ nodes:
     - test-output
     - pr-review
     - spdd artifact (spdd/prompt/*-b6-*.md) Sync Log updated
+    recorded:
+    - 'PR #59 (merged 2026-08-24, closes #14): T-035/T-036/T-037 implemented —
+      core/scoring.py pure trace projection (identical traces -> identical
+      scores carrying the source traceHash), exhaustive terminal-state ->
+      outcome mapping {extraction-win, fuel-win, forfeit-win, draw, void}
+      with UndefinedOutcome refusal on unknown states, canary-leak detection
+      scoring extraction-win for the opponent overriding the stated outcome
+      (both leak -> void); suite 186->194; Sync Log records the projection
+      re-scope.'
   boundary: Scoring is deterministic given a trace; it does not judge intent.
   surfaces:
     allow: *id002
@@ -613,7 +622,7 @@ nodes:
 - id: B7
   type: implementation
   title: Format balance harness
-  status: blocked
+  status: ready
   objective: Without a balance harness, the first dominant strategy ends the format's competitive
     life.
   epic: E06
