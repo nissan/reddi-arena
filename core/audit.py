@@ -70,7 +70,17 @@ def audit_match(trace: dict, name: str) -> dict:
 def flag_sustained(audits: list[dict]) -> dict:
     """Aggregate a series of per-match audits for one competitor and flag
     sustained overrun with the measured delta (T-081). The only escalation
-    is routing to human review — never an automatic ban."""
+    is routing to human review — never an automatic ban.
+
+    All audits must be for the SAME competitor: the result is labelled with
+    audits[0]'s name and the deltas are summed, so mixing competitors would
+    silently attribute one bot's overruns to another. A mixed series is a
+    caller error and fails loudly rather than mislabelling (audit T12)."""
+    competitors = {a.get("competitor") for a in audits}
+    if len(competitors) > 1:
+        raise ValueError(
+            f"flag_sustained aggregates one competitor's audits; got mixed "
+            f"competitors {sorted(str(c) for c in competitors)}")
     with_signals = [a for a in audits if a["signals"]]
     delta: dict[str, int] = {}
     for a in with_signals:

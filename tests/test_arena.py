@@ -972,6 +972,20 @@ check("T-081 no ban mechanism exists in the audit module",
                   if not _k.startswith("_")))
 check("T-081 an empty audit series is safe and unflagged",
       flag_sustained([])["flagged"] is False)
+# T12 (audit): flag_sustained aggregates ONE competitor's audits; a mixed series
+# would silently attribute one bot's overruns to another, so it fails loudly.
+_t12_mixed = [audit_match(_grafted, DEF["metadata"]["name"]),
+              audit_match(_grafted, RAID["metadata"]["name"])]
+def _t12_raises():
+    try:
+        flag_sustained(_t12_mixed)
+        return False
+    except ValueError:
+        return True
+check("T12 a mixed-competitor audit series raises, never mislabels",
+      _t12_raises()
+      and flag_sustained([audit_match(_grafted, DEF["metadata"]["name"])])
+          ["competitor"] == DEF["metadata"]["name"])
 
 print("trace emission with declared redaction (B5: T-032 T-033 T-034)")
 from core.emit import (
