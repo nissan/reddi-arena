@@ -122,9 +122,14 @@ Reviewer verdict: FINDINGS. **Remediation status (2026-08-24):**
   hire that breaches it forfeits before turn 1 (both illegal → void); with no
   entered class stated (internal balance/parity runs) the hire plays as before,
   so the sweep is byte-identical and no regen was needed.
-- **Land-last (outcome-changing) batch:** L4 (lane authorization gating the
-  outcome, fail-closed = refusal suppresses effect) is the remaining
-  user-approved game-rule change — decision recorded.
+- **Landed** (`fix/fail-closed-lane`): L4 — capability use is now FAIL-CLOSED
+  (user decision: refusal suppresses effect). The probe's extraction effect
+  lands only if the attacker holds the probe capability AND the lane authorized
+  the invoke; an undeclared or lane-refused probe fizzles (no extraction, secret
+  held) instead of executing anyway. Fixtures declare + authorize probeCompose,
+  so the sweep is byte-identical (no regen); only unauthorized attackers change.
+  Both user-decided game-rule changes (L2/E7 draft enforcement, L4 fail-closed
+  lane) are now landed.
 - **Follow-up:** L6 nit (`HIRE_DEPTH_CAP` sub-hire scope).
 
 | id | sev | finding | disposition |

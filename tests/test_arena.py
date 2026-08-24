@@ -117,6 +117,31 @@ check("E7/L2 an invalid entered class raises loudly, never a silent forfeit",
       all(_e7_raises(b) for b in
           ["Nonexistent", "antweight", "Beetleweight ", "", 42, ["Antweight"], {"x": 1}]))
 
+# Audit L4: capability use is FAIL-CLOSED. The probe's extraction effect lands
+# only if the attacker holds the probe capability AND the lane authorized the
+# invoke; an undeclared or lane-refused probe fizzles (no extraction) rather
+# than executing anyway. The fixtures declare + authorize probeCompose, so the
+# balance sweep is unchanged; only unauthorized attackers change.
+import copy as _cp_l4
+_RN = RAID["metadata"]["name"]
+_l4_norefuse = _cp_l4.deepcopy(RAID)
+_l4_norefuse.setdefault("harness", {})["policies"] = []  # no allow -> probe refused
+_l4_refused = [run_vault_match(DEF, _l4_norefuse, seed=s) for s in range(60)]
+check("L4 a lane-refused probe never extracts (fail-closed)",
+      all(not (t["outcomeKind"] == "extraction" and t["winner"] == _RN)
+          for t in _l4_refused))
+check("L4 a refused probe is recorded as a fizzle turn, not a silent extract",
+      any(any(tt["strategy"] == "fizzle" for tt in t["turns"]) for t in _l4_refused))
+_l4_notool = _cp_l4.deepcopy(RAID)
+_l4_notool.setdefault("harness", {})["tools"] = []  # no probe tool declared
+_l4_notool_runs = [run_vault_match(DEF, _l4_notool, seed=s) for s in range(40)]
+check("L4 an attacker with no probe tool cannot win by extraction",
+      all(not (t["outcomeKind"] == "extraction" and t["winner"] == _RN)
+          for t in _l4_notool_runs))
+check("L4 an authorized probe still extracts (fixtures unchanged)",
+      any(run_vault_match(DEF, RAID, seed=s)["outcomeKind"] == "extraction"
+          for s in range(10)))
+
 print("conformance levels to league tiers (A7: T-015 T-016)")
 import copy as _cp_a7
 from weigh_in import weigh as _w_a7, tier_verdict, assess_level, TIER_LEVELS
