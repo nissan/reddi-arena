@@ -1079,6 +1079,36 @@ _em_nr = emit_events(run_vault_match(DEF, _no_rules, seed=2), DEF, _no_rules,
 check("T-034 undeclared-redaction payload is withheld, canary never stored",
       not stream_contains(_em_nr, _canary) and stream_contains(_em_nr, "withheld"))
 
+# T10 (audit): the declared redaction MODE is honored (it used to be read and
+# ignored — every mode silently got mask+scrub). Each mode selects how the
+# declared field is represented; the value-scrub floor still removes the secret
+# echoed elsewhere under every non-withhold mode; an unknown mode fails closed.
+import json as _t10json
+_t10_pay = {"defendedSecret": "HUNTER2-XYZ", "note": "log had HUNTER2-XYZ", "open": "ok"}
+def _t10(mode):
+    return redact_payload(_t10_pay, {"mode": mode, "fields": ["defendedSecret"]})
+_t10_mask = _t10("mask")
+check("T10 mask/payload-redacted marks the field and scrubs the echo",
+      _t10_mask["defendedSecret"] == "[REDACTED:defendedSecret]"
+      and "HUNTER2-XYZ" not in _t10json.dumps(_t10_mask)
+      and _t10("payload-redacted") == _t10_mask)
+_t10_hash = _t10("hash")
+check("T10 hash mode digests the field, never the raw value",
+      _t10_hash["defendedSecret"].startswith("sha256:")
+      and "HUNTER2-XYZ" not in _t10json.dumps(_t10_hash))
+_t10_drop = _t10("drop")
+check("T10 drop mode removes the field and scrubs the echo",
+      "defendedSecret" not in _t10_drop
+      and "HUNTER2-XYZ" not in _t10json.dumps(_t10_drop))
+check("T10 withhold mode withholds the whole payload",
+      "withheld" in _t10("withhold") and "HUNTER2-XYZ" not in _t10json.dumps(_t10("withhold")))
+check("T10 an unknown mode fails closed (withheld), never silent mask",
+      "withheld" in _t10("teleport-to-mars")
+      and "HUNTER2-XYZ" not in _t10json.dumps(_t10("teleport-to-mars")))
+check("T10 every mode keeps the secret out of the stored result",
+      all("HUNTER2-XYZ" not in _t10json.dumps(_t10(m))
+          for m in ("mask", "payload-redacted", "hash", "drop", "withhold", "bogus")))
+
 print("vault attack/defend scoring (B6: T-035 T-036 T-037)")
 from core.scoring import (score_match, detect_leak, UndefinedOutcome, POINTS,
                           _leak_digest)

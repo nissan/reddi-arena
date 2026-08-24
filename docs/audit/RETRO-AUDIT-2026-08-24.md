@@ -99,7 +99,7 @@ Reviewer verdict: FINDINGS (yellow). **Remediation status (2026-08-24):**
 | T7 | major | audit has no signal for actual overspend (`spent > cap` audits clean) | trace-projection PR |
 | T8 | major | no name-uniqueness enforcement (same as E4) | structured-outcome PR |
 | T9 | minor | sequential scrubbing corrupts overlapping secrets (scrub longest-first) | trace-projection PR |
-| T10 | minor | mask spoofing; declared redaction `mode` never honored | trace-projection PR |
+| T10 | minor | mask spoofing; declared redaction `mode` never honored | **landed** `fix/redaction-modes` (mode dispatch; unknown → fail closed; F-013 filed) |
 | T11 | minor | `effective_doc` leaves capability-omitting providers uncapped (biases divergence to zero) | **landed** `fix/provider-omission-cap` |
 | T12 | nit | `flag_sustained` mixed-competitor aggregation; TEST-PLAN T-037 row overstates verbatim scope | **landed** `fix/audit-nits` |
 

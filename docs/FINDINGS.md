@@ -35,6 +35,7 @@ below has exactly one disposition; T-093 asserts this register stays complete.
 | F-010 | filed | [reddiagent-lab#443](https://github.com/nissan/reddiagent-lab/issues/443) |
 | F-011 | filed | [reddiagent-lab#444](https://github.com/nissan/reddiagent-lab/issues/444) |
 | F-012 | filed | [reddiagent-lab#450](https://github.com/nissan/reddiagent-lab/issues/450) |
+| F-013 | filed | [reddiagent-lab#451](https://github.com/nissan/reddiagent-lab/issues/451) |
 
 Disposition vocabulary: `filed` (own intake issue), `evidence-attached`
 (reproduction added to an existing lab item), `duplicate` (already tracked
@@ -467,3 +468,21 @@ assessment is explicitly named `arenaAssessedLevel` (never `achievedLevel`),
 L3 evidence accepts either declaration site, and tier eligibility anchors to
 `min(requestedLevel, arenaAssessedLevel)` — which reproduces both recorded
 lab verdicts (defender 1, mercenary 3) without claiming canonical authority.
+
+### F-013 — `harness.observability.redaction.mode` has no defined vocabulary or semantics
+
+**Filed upstream 2026-08-24:** [reddiagent-lab#451](https://github.com/nissan/reddiagent-lab/issues/451).
+
+Discovered during the retro-audit remediation (item T10): the redaction block
+carries a `mode` field, but the spec defines neither the enumerated mode
+vocabulary nor the representation each mode implies. Arena's trace emitter read
+`mode` and ignored it — every declared mode silently got the same mask+scrub —
+because there was nothing canonical to honor. On a security-relevant surface,
+a read-but-unspecified directive means two conformant implementations can
+disagree (or ignore it), so an author cannot rely on the declaration to control
+how secrets are represented in stored evidence. Requested for v0.3: define the
+mode enum, each mode's representation, and the required unrecognized-mode
+behavior (recommended fail-closed). Arena mitigation (PROVISIONAL, reconciled
+to v0.3 when defined): `payload-redacted`/`mask` → marker, `hash` → digest,
+`drop` → remove, `withhold` → withhold, unknown → withhold; every non-withhold
+mode still applies the value-scrub floor so no declared secret survives.
