@@ -296,6 +296,70 @@ check("T-024 both competitors faulty voids the match",
 check("T-024 fault forfeits are deterministic",
       run_vault_match(_crash, RAID, seed=2)["traceHash"] == _t24["traceHash"])
 
+# Fault-hardening (retro-audit E1/E2/E3/E9/E10): malformed declarations
+# resolve to a defined terminal trace, never an unhandled exception.
+def _mut(base, fn):
+    d = _cp.deepcopy(base)
+    fn(d)
+    return d
+_malformed = {
+    "extensions non-dict (E2)": lambda d: d.__setitem__("extensions", "yes"),
+    "model non-dict (E2)": lambda d: d.__setitem__("model", "big"),
+    "harness non-dict (E2)": lambda d: d.__setitem__("harness", "h"),
+    "metadata non-dict (E2)": lambda d: d.__setitem__("metadata", "m"),
+    "requirements non-dict (E2)": lambda d: d["model"].__setitem__("requirements", "r"),
+    "tools list-of-strings (E2)": lambda d: d["harness"].__setitem__("tools", ["x"]),
+    "policies list-of-strings (E2)": lambda d: d["harness"].__setitem__("policies", ["p"]),
+    "strategy non-dict (E2)": lambda d: d["extensions"]["x-arena"].__setitem__("strategy", "aggro"),
+    "maxOutputTokens string (E1)": lambda d: d["model"]["requirements"].__setitem__("maxOutputTokens", "512"),
+    "missing metadata.name (E9)": lambda d: d["metadata"].pop("name"),
+}
+_fault_ok = True
+for _label, _fn in _malformed.items():
+    for _combo in ("A", "both"):
+        _da = _mut(DEF, _fn)
+        _db = _mut(RAID, _fn) if _combo == "both" else _cp.deepcopy(RAID)
+        try:
+            _tf = run_vault_match(_da, _db, seed=2)
+            _fault_ok = (_fault_ok and _tf["lifecycle"]["terminal"]
+                         and _tf["traceHash"].startswith("sha256:"))
+        except Exception:
+            _fault_ok = False
+check("fault-hardening: every malformed declaration resolves to a terminal trace, never crashes",
+      _fault_ok)
+# The clearly-unreadable declarations (strategy/fuel/name faults) forfeit
+# pre-turn specifically, rather than merely not crashing.
+check("fault-hardening: unreadable strategy/fuel/name faults forfeit before turn 1",
+      all(run_vault_match(_mut(DEF, _f), RAID, seed=2)["turns"] == []
+          for _f in (_malformed["strategy non-dict (E2)"],
+                     _malformed["maxOutputTokens string (E1)"],
+                     _malformed["missing metadata.name (E9)"])))
+# E3: a string-numeral contextWindow must NOT buy fuel — weigh awards it 0 AU,
+# so granting a huge tank was a weight-class dodge. It now forfeits.
+_dodge = _cp.deepcopy(DEF)
+_dodge["model"]["requirements"]["contextWindow"] = "999999"
+check("E3: string-numeral contextWindow forfeits (no weight-class fuel dodge)",
+      run_vault_match(_dodge, RAID, seed=0, max_turns=200)["lifecycle"]["state"] == "forfeit")
+# E1: budget_gate does not raise on a non-numeric maxOutputTokens.
+from core.fuel import budget_gate as _bg
+check("E1: budget_gate fails closed (no crash) on non-numeric maxOutputTokens",
+      _bg({"model": {"requirements": {"maxOutputTokens": "512"}}}, 8000)["passed"] is False)
+check("E1: budget_gate tolerates a non-mapping model/requirements",
+      _bg({"model": "big"}, 8000)["passed"] is True
+      and _bg("not a doc", 8000)["passed"] is True)
+# E10: the non-terminal-trace guard is a real exception, not an assert (so it
+# survives python3 -O). _finalize raises when handed a non-terminal lifecycle.
+import core.arena as _arena_mod
+from core.lifecycle import MatchLifecycle as _MLC
+_raised_e10 = False
+try:
+    _arena_mod._finalize(["a", "b"], [], -1, "x", [True, True], [1, 1], [1, 1],
+                         0, lifecycle=_MLC())
+except Exception:
+    _raised_e10 = True
+check("E10: finalizing a non-terminal lifecycle raises (survives python3 -O)",
+      _raised_e10)
+
 # T-025 — illegal lifecycle transitions are unreachable: exhaustive sweep of
 # every (state, target) pair, reaching each state only via legal walks.
 _paths = {

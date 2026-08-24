@@ -29,11 +29,17 @@ class ExecutionLane:
         being fielded. A mismatch is an escape attempt (E1I): the lane emits a
         binding refusal and refuses every subsequent invocation — a bot cannot
         be weighed in one configuration and fielded in another (T-077)."""
-        self.subject = "agent:" + ((doc.get("metadata") or {}).get("name") or "unknown")
-        harness = doc.get("harness") or {}
-        self.tools = {t.get("id"): t for t in harness.get("tools") or []}
-        self.policies = list(harness.get("policies") or [])
-        network = (harness.get("runtime") or {}).get("network") or {}
+        # Defensive reads: a malformed (non-mapping) container reads as empty
+        # rather than raising AttributeError (audit E2). The engine's fault
+        # check forfeits such a document; the lane must not crash constructing.
+        def _m(x):
+            return x if isinstance(x, dict) else {}
+        self.subject = "agent:" + (_m(doc.get("metadata")).get("name") or "unknown")
+        harness = _m(doc.get("harness"))
+        self.tools = {t.get("id"): t for t in harness.get("tools") or []
+                      if isinstance(t, dict)}
+        self.policies = [p for p in (harness.get("policies") or []) if isinstance(p, dict)]
+        network = _m(_m(harness.get("runtime")).get("network"))
         self.egress_allowlist = list(network.get("allowlist") or [])
         self.events: list[dict] = []
         self._invocations: dict[str, int] = {}
@@ -89,8 +95,12 @@ class ExecutionLane:
 
 
 def find_tool(doc: dict, fragment: str) -> str | None:
-    """First declared tool id containing the fragment (case-insensitive)."""
-    for tool in (doc.get("harness") or {}).get("tools") or []:
-        if fragment.lower() in str(tool.get("id", "")).lower():
+    """First declared tool id containing the fragment (case-insensitive).
+    Tolerates a malformed harness/tools (audit E2): non-mapping entries are
+    skipped rather than raising."""
+    harness = doc.get("harness") if isinstance(doc, dict) else None
+    tools = harness.get("tools") if isinstance(harness, dict) else None
+    for tool in tools or []:
+        if isinstance(tool, dict) and fragment.lower() in str(tool.get("id", "")).lower():
             return tool.get("id")
     return None

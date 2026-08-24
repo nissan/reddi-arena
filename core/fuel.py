@@ -34,13 +34,25 @@ def budget_gate(doc: dict, cap: int) -> dict:
 
     `cap` is the effective fuel cap already read (and fault-checked) by the
     engine. Returns {"passed", "cap", "perTurnCost", "reason"}."""
-    requirements = (doc.get("model") or {}).get("requirements") or {}
+    model = doc.get("model") if isinstance(doc, dict) else None
+    requirements = (model.get("requirements") or {}) if isinstance(model, dict) else {}
+    if not isinstance(requirements, dict):
+        requirements = {}
     declared_out = requirements.get("maxOutputTokens")
-    if declared_out is not None and TURN_COMPLETION_COST > declared_out:
+    # A non-numeric maxOutputTokens is a malformed declaration, not a pass:
+    # comparing an int against a str raises (audit E1). Fail the gate with a
+    # stated reason instead of an unhandled TypeError.
+    if declared_out is not None and not isinstance(declared_out, bool) \
+            and isinstance(declared_out, (int, float)):
+        if TURN_COMPLETION_COST > declared_out:
+            return {"passed": False, "cap": cap, "perTurnCost": TURN_COST,
+                    "reason": (f"budget gate: per-turn completion "
+                               f"{TURN_COMPLETION_COST} tokens exceeds declared "
+                               f"maxOutputTokens {declared_out}")}
+    elif declared_out is not None:
         return {"passed": False, "cap": cap, "perTurnCost": TURN_COST,
-                "reason": (f"budget gate: per-turn completion "
-                           f"{TURN_COMPLETION_COST} tokens exceeds declared "
-                           f"maxOutputTokens {declared_out}")}
+                "reason": (f"budget gate: unreadable maxOutputTokens "
+                           f"{declared_out!r} (non-numeric)")}
     if TURN_COST > cap:
         return {"passed": False, "cap": cap, "perTurnCost": TURN_COST,
                 "reason": (f"budget gate: per-turn cost {TURN_COST} tokens "

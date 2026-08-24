@@ -63,11 +63,17 @@ def _hash(obj) -> str:
 # Provisional price extension (F-007). ONE function reads it, so swapping to a
 # real ADL v0.3 price field later is a one-line change.
 # --------------------------------------------------------------------------
+def _mm(x) -> dict:
+    """Coerce a should-be-mapping to a dict (audit E2): a malformed container
+    reads as empty instead of raising AttributeError on `.get`."""
+    return x if isinstance(x, dict) else {}
+
+
 def advertised_price(merc_doc: dict) -> dict:
     """Read x-arena.price. Provisional pending ADL v0.3 (F-007)."""
-    xarena = (merc_doc.get("extensions") or {}).get("x-arena") or {}
-    price = xarena.get("price")
-    if price is None:
+    xarena = _mm(_mm(merc_doc.get("extensions") if isinstance(merc_doc, dict) else {}).get("x-arena"))
+    price = _mm(xarena.get("price"))
+    if not price:
         return {"amount": None, "currency": ARENA_CURRENCY, "provisional": True,
                 "note": "no x-arena.price declared"}
     return {
@@ -174,21 +180,44 @@ def evaluate_hire(competitor_doc: dict, merc_doc: dict, entered_class: str) -> D
 # A hired source-auditor grants a defense bonus (it catches untrusted-source
 # citation traps), modelling the real capability the mercenary declares.
 
+def _dig(doc, *keys):
+    """Walk nested mappings. Returns (value_or_None, ok); ok is False if any
+    intermediate is present but not a mapping — a malformed declaration the
+    caller resolves to a defined fault, never an AttributeError (audit E2)."""
+    cur = doc
+    for k in keys:
+        if cur is None:
+            return None, True
+        if not isinstance(cur, dict):
+            return None, False
+        cur = cur.get(k)
+    return cur, True
+
+
+def _is_number(x) -> bool:
+    # bool is an int subclass but is never a valid numeric declaration here.
+    return isinstance(x, (int, float)) and not isinstance(x, bool)
+
+
 def _read_strategy(doc: dict) -> tuple[dict | None, str | None]:
     """Fault-checked read of the declared play profile (B2 / T-024).
 
     ARENA-PROFILE-v0.1 declares strategy as {attack: 0-100, defense: 0-100}.
-    A declaration the engine cannot read (non-numeric) or one outside the
-    declared domain is the deterministic analogue of a crashed or hung
-    competitor: it resolves to a defined forfeit before the first turn
-    instead of an exception hanging the match."""
-    xa = (doc.get("extensions") or {}).get("x-arena") or {}
-    strat = xa.get("strategy") or {}
-    try:
-        attack = int(strat.get("attack", 50))
-        defense = int(strat.get("defense", 50))
-    except (TypeError, ValueError):
+    A declaration the engine cannot read (non-numeric, non-mapping container)
+    or one outside the declared domain is the deterministic analogue of a
+    crashed or hung competitor: it resolves to a defined forfeit before the
+    first turn instead of an exception hanging the match (audit E2)."""
+    strat, ok = _dig(doc, "extensions", "x-arena", "strategy")
+    if not ok:
+        return None, "unreadable strategy declaration (malformed extensions/x-arena)"
+    strat = strat if strat is not None else {}
+    if not isinstance(strat, dict):
+        return None, "unreadable strategy declaration (strategy is not a mapping)"
+    attack_raw = strat.get("attack", 50)
+    defense_raw = strat.get("defense", 50)
+    if not (_is_number(attack_raw) and _is_number(defense_raw)):
         return None, "unreadable strategy declaration (non-numeric attack/defense)"
+    attack, defense = int(attack_raw), int(defense_raw)
     if not (0 <= attack <= 100 and 0 <= defense <= 100):
         return None, (f"strategy outside the declared 0-100 domain "
                       f"(attack={attack}, defense={defense})")
@@ -197,13 +226,33 @@ def _read_strategy(doc: dict) -> tuple[dict | None, str | None]:
 
 def _read_fuel(doc: dict) -> tuple[int, str | None]:
     """Fault-checked fuel cap. Antweight fuel model: contextWindow tokens are
-    the cap, minimum 2000. An unreadable declaration is a competitor fault."""
-    reqs = (doc.get("model") or {}).get("requirements") or {}
-    try:
-        cw = int(reqs.get("contextWindow", 8000))
-    except (TypeError, ValueError):
+    the cap, minimum 2000. A non-mapping requirements block or a non-numeric
+    contextWindow is a competitor fault (audit E2/E3).
+
+    contextWindow must be a real number — a STRING numeral is rejected here
+    exactly as tools/weigh_in.py rejects it for AU (it awards 0 AU for a
+    non-numeric value). Accepting `int("999999")` here while weigh awards 0
+    AU was a weight-class dodge: a huge fuel tank on a featherweight-free
+    declaration (audit E3)."""
+    reqs, ok = _dig(doc, "model", "requirements")
+    if not ok:
+        return 0, "unreadable fuel declaration (malformed model/requirements)"
+    reqs = reqs if reqs is not None else {}
+    if not isinstance(reqs, dict):
+        return 0, "unreadable fuel declaration (requirements is not a mapping)"
+    cw = reqs.get("contextWindow", 8000)
+    if not _is_number(cw):
         return 0, "unreadable fuel declaration (non-numeric contextWindow)"
-    return max(cw, 2000), None
+    return max(int(cw), 2000), None
+
+
+def _competitor_name(doc: dict) -> str | None:
+    """Defensive read of the competitor name (audit E9). Missing/blank name,
+    or a non-mapping metadata block, is a fault — never a KeyError or
+    AttributeError mid-setup."""
+    meta = doc.get("metadata") if isinstance(doc, dict) else None
+    name = meta.get("name") if isinstance(meta, dict) else None
+    return name if isinstance(name, str) and name else None
 
 
 @dataclass
@@ -225,7 +274,12 @@ def run_vault_match(bot_a: dict, bot_b: dict, seed: int = 0,
     Deterministic Vault match. Given identical inputs and seed, always returns
     an identical result and trace. This is the substrate the replay renders.
     """
-    names = [bot_a["metadata"]["name"], bot_b["metadata"]["name"]]
+    # E9: names are read defensively; a missing name is a fault resolved as a
+    # forfeit below, never a KeyError mid-setup. Slot placeholders keep the
+    # trace well-formed even when a name is absent.
+    raw_names = [_competitor_name(bot_a), _competitor_name(bot_b)]
+    names = [raw_names[i] or f"unnamed-competitor-{i}" for i in range(2)]
+    name_faults = [None if raw_names[i] else "missing metadata.name" for i in range(2)]
 
     # B2: the lifecycle state machine is the spine of the match. Every match
     # walks scheduled -> weighing -> binding -> (in-progress ->) terminal, and
@@ -258,7 +312,8 @@ def run_vault_match(bot_a: dict, bot_b: dict, seed: int = 0,
     fuel_read = [_read_fuel(bot_a), _read_fuel(bot_b)]
     strat = [s for s, _ in strat_read]
     fuel = [f for f, _ in fuel_read]
-    faults = [strat_read[i][1] or fuel_read[i][1] for i in range(2)]
+    faults = [name_faults[i] or strat_read[i][1] or fuel_read[i][1]
+              for i in range(2)]
 
     # B4: fuel is charged ONLY through the meters; every charge is an
     # itemized ledger entry, and the trace's fuelAccounting reconciles with
@@ -428,7 +483,13 @@ def _finalize(names, turns, winner, reason, secret_held, fuel, fuel_left, seed,
     if lifecycle is not None:
         # B2 / T-023: the trace carries the full lifecycle path, hash-covered,
         # and no non-terminal trace can be produced.
-        assert lifecycle.terminal, "match finalized in a non-terminal state"
+        # A real exception, not an assert: the "no non-terminal trace can be
+        # produced" invariant (B2/T-023) must hold under `python3 -O`, which
+        # strips asserts (audit E10).
+        if not lifecycle.terminal:
+            raise RuntimeError(
+                f"match finalized in non-terminal lifecycle state "
+                f"{lifecycle.state!r}")
         trace["lifecycle"] = lifecycle.snapshot()
     if meters is not None:
         # B4 / T-031: the itemized fuel ledger ships in the trace,

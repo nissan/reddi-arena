@@ -107,6 +107,8 @@ def _referenced_policy_ids(harness: dict) -> set[str]:
     referenced: set[str] = set()
     for collection in ("tools", "functions"):
         for item in harness.get(collection) or []:
+            if not isinstance(item, dict):
+                continue
             for ref in item.get("policyRefs") or []:
                 referenced.add(ref)
     return referenced
@@ -131,31 +133,33 @@ TIER_LEVELS = {"rookie": 1, "open": 2, "title": 3}
 
 
 def _l1(doc: dict) -> bool:
-    return bool((doc.get("metadata") or {}).get("name")
+    return bool(_m(doc.get("metadata")).get("name")
                 and doc.get("model")
-                and (doc.get("harness") or {}).get("tools"))
+                and _m(doc.get("harness")).get("tools"))
 
 
 def _l2(doc: dict) -> bool:
-    harness = doc.get("harness") or {}
+    harness = _m(doc.get("harness"))
     tools = harness.get("tools") or []
     policies = harness.get("policies") or []
-    covered = {p.get("resource") for p in policies}
-    obs = harness.get("observability") or {}
+    covered = {p.get("resource") for p in policies if isinstance(p, dict)}
+    obs = _m(harness.get("observability"))
     return bool(tools and obs.get("events")
-                and all(f"tool:{t.get('id')}" in covered for t in tools))
+                and all(isinstance(t, dict) and f"tool:{t.get('id')}" in covered
+                        for t in tools))
 
 
 def _l3(doc: dict) -> bool:
     # Evidence may live in conformance.evidenceRefs OR on the observability
     # events themselves — the lab-certified L3 reference mercenary declares
     # only the latter (finding F-012, reddiagent-lab#450).
-    obs = (doc.get("harness") or {}).get("observability") or {}
-    conf = doc.get("conformance") or {}
+    obs = _m(_m(doc.get("harness")).get("observability"))
+    conf = _m(doc.get("conformance"))
     events = obs.get("events") or []
     evidenced = bool(conf.get("evidenceRefs")
-                     or (events and all(e.get("evidenceRef") for e in events)))
-    return bool((obs.get("redaction") or {}).get("fields")
+                     or (events and all(isinstance(e, dict) and e.get("evidenceRef")
+                                        for e in events)))
+    return bool(_m(obs.get("redaction")).get("fields")
                 and obs.get("retention")
                 and evidenced)
 
@@ -199,7 +203,7 @@ def tier_verdict(doc: dict) -> dict:
     """
     assessment = assess_level(doc)
     assessed = assessment["arenaAssessedLevel"]
-    requested = (doc.get("conformance") or {}).get("requestedLevel")
+    requested = _m(doc.get("conformance")).get("requestedLevel")
     if requested is not None and (not isinstance(requested, int)
                                   or isinstance(requested, bool)):
         return {
@@ -243,13 +247,22 @@ def tier_verdict(doc: dict) -> dict:
     }
 
 
+def _m(x) -> dict:
+    """Coerce a value that should be a mapping to a dict — a malformed
+    (non-mapping) container reads as empty rather than raising AttributeError
+    on `.get` (audit E2). weigh() must not crash on an untrusted document;
+    run_vault_match's fault check then forfeits such a document."""
+    return x if isinstance(x, dict) else {}
+
+
 def weigh(doc: dict, hires: list[dict] | None = None) -> dict:
     """Return a full weigh-in certificate for an ADL document."""
     lines: list[tuple[str, int]] = []
 
-    model = doc.get("model") or {}
-    harness = doc.get("harness") or {}
-    reqs = model.get("requirements") or {}
+    doc = _m(doc)
+    model = _m(doc.get("model"))
+    harness = _m(doc.get("harness"))
+    reqs = _m(model.get("requirements"))
 
     lines.append(("chassis.base", CHASSIS_BASE))
     lines.append(("chassis.contextWindow", _tier(reqs.get("contextWindow"), 8000, 6)))
@@ -265,31 +278,39 @@ def weigh(doc: dict, hires: list[dict] | None = None) -> dict:
             lines.append((f"chassis.modality.{modality}", au))
 
     for tool in harness.get("tools") or []:
+        if not isinstance(tool, dict):
+            continue
         tool_au = TOOL_BASE_AU
-        mode = ((tool.get("sideEffects") or {}).get("mode")) or "none"
+        mode = _m(tool.get("sideEffects")).get("mode") or "none"
         tool_au += SIDE_EFFECT_AU.get(mode, 14)
         if tool.get("auditLevel") == "full":
             tool_au += AUDIT_FULL_AU
         lines.append((f"tool.{tool.get('id', '?')}", tool_au))
 
     for fn in harness.get("functions") or []:
-        lines.append((f"function.{fn.get('id', '?')}", FUNCTION_AU))
+        if isinstance(fn, dict):
+            lines.append((f"function.{fn.get('id', '?')}", FUNCTION_AU))
 
     for skill in harness.get("skills") or []:
-        lines.append((f"skill.{skill.get('id', '?')}", SKILL_AU))
+        if isinstance(skill, dict):
+            lines.append((f"skill.{skill.get('id', '?')}", SKILL_AU))
 
     for src in harness.get("dataSources") or []:
+        if not isinstance(src, dict):
+            continue
         src_au = SOURCE_TYPE_AU.get(src.get("type"), 8)
         src_au += TRUST_AU.get(src.get("trust"), 6)
         lines.append((f"source.{src.get('id', '?')}", src_au))
 
-    memory_mode = (harness.get("memory") or {}).get("mode", "session")
+    memory_mode = _m(harness.get("memory")).get("mode", "session")
     if MEMORY_AU.get(memory_mode, 25):
         lines.append((f"memory.{memory_mode}", MEMORY_AU.get(memory_mode, 25)))
 
     referenced = _referenced_policy_ids(harness)
     credit = 0
     for policy in harness.get("policies") or []:
+        if not isinstance(policy, dict):
+            continue
         pid = policy.get("id")
         # Deny-effect policies always earn credit; allow-policies must be
         # referenced by a declared capability so no-op padding cannot farm credit.
@@ -299,9 +320,10 @@ def weigh(doc: dict, hires: list[dict] | None = None) -> dict:
     if credit:
         lines.append(("policy.hygiene-credit", credit))
 
-    intents = ((doc.get("extensions") or {}).get("x402") or {}).get("intents") or []
+    intents = _m(_m(doc.get("extensions")).get("x402")).get("intents") or []
     for intent in intents:
-        lines.append((f"x402.intent.{intent.get('id', '?')}", PAYMENT_INTENT_AU))
+        if isinstance(intent, dict):
+            lines.append((f"x402.intent.{intent.get('id', '?')}", PAYMENT_INTENT_AU))
 
     solo_au = sum(au for _, au in lines)
 
@@ -315,8 +337,8 @@ def weigh(doc: dict, hires: list[dict] | None = None) -> dict:
 
     certificate = {
         "weightsVersion": WEIGHTS_VERSION,
-        "agent": (doc.get("metadata") or {}).get("name"),
-        "requestedConformanceLevel": (doc.get("conformance") or {}).get("requestedLevel"),
+        "agent": _m(doc.get("metadata")).get("name"),
+        "requestedConformanceLevel": _m(doc.get("conformance")).get("requestedLevel"),
         "soloAU": solo_au,
         "soloClass": classify(solo_au),
         "fieldedAU": fielded_au,
