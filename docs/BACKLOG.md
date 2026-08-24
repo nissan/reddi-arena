@@ -417,7 +417,7 @@ Every issue carries: rationale, dependencies, an explicit boundary (what it does
 
 - `T-035` (determinism) — Identical traces always produce identical scores
 - `T-036` (property) — Every terminal state maps to exactly one scoring outcome
-- `T-037` (adversarial) — Secret leakage in encoded, partial, or paraphrased form still scores as extraction
+- `T-037` (adversarial) — A canary value leaked in verbatim or JSON-escaped form scores as extraction (encoded/paraphrased/transformed leaks are out of scope for the dry-run arena)
 
 ### B7 — Format balance harness
 

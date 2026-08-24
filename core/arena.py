@@ -110,6 +110,11 @@ def weigh_competitor(doc: dict, hires: list[dict] | None = None) -> dict:
 
 # Draft rule (A5): a fielded specialist cannot itself field sub-hires in v0.1.
 # The cap is checked before any weighing, so hire chains can never recurse.
+# Scope (audit L6): the cap bounds the length of the caller-supplied hire CHAIN
+# passed to evaluate_hire_chain. Sub-hires a specialist declares INSIDE its own
+# ADL are not a separate vector — the engine never reads or fields a hire's own
+# embedded hires (a hire contributes only its solo weight and declared grants),
+# so an embedded sub-hire declaration is inert, not an unbounded chain.
 HIRE_DEPTH_CAP = 1
 
 # Arena-local ceiling on the defense bonus a single hire's DECLARED grant

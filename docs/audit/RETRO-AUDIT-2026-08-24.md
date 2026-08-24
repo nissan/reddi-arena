@@ -102,7 +102,7 @@ Reviewer verdict: FINDINGS (yellow). **Remediation status (2026-08-24):**
 | T9 | minor | sequential scrubbing corrupts overlapping secrets (scrub longest-first) | trace-projection PR |
 | T10 | minor | mask spoofing; declared redaction `mode` never honored | trace-projection PR |
 | T11 | minor | `effective_doc` leaves capability-omitting providers uncapped (biases divergence to zero) | **landed** `fix/provider-omission-cap` |
-| T12 | nit | `flag_sustained` mixed-competitor aggregation; TEST-PLAN T-037 row overstates verbatim scope | doc/assert |
+| T12 | nit | `flag_sustained` mixed-competitor aggregation; TEST-PLAN T-037 row overstates verbatim scope | **landed** `fix/audit-nits` |
 
 Confirmed clean: determinism of all projections; fail-closed provider
 selection; fail-closed payload withholding; no ban machinery; all four modules
@@ -146,7 +146,7 @@ Reviewer verdict: FINDINGS. **Remediation status (2026-08-24):**
 | L3 | major | in-match hire bonus keyed on name substring, farmable/dodgeable (= E6) | game-rule PR |
 | L4 | major | lane authorization does not gate the match outcome; undeclared/denied capability still "executes" | **decision node** — see below |
 | L5 | minor | escape-test coverage blind spot (only tool-add mutations); egress/policy-target changes untested | binding PR |
-| L6 | nit | `HIRE_DEPTH_CAP` bounds caller chain length, not sub-hires declared inside a specialist | note / follow-up |
+| L6 | nit | `HIRE_DEPTH_CAP` bounds caller chain length, not sub-hires declared inside a specialist | **landed** `fix/audit-nits` (doc: embedded sub-hires are inert, verified) |
 
 Confirmed clean: `evaluate_hire` ceiling math and fail-closed unknown-class
 default; O(1) depth-cap refusal; determinism; hash DOES change for

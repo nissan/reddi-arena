@@ -56,7 +56,7 @@ An issue is done when its tests pass in CI. Nothing is done because a planning t
 | T-034 | adversarial | secret-scanner over stored traces | No credential or canary value appears in any stored trace | B5, E3I |
 | T-035 | determinism | pytest golden traces | Identical traces always produce identical scores | B6 |
 | T-036 | property | hypothesis | Every terminal state maps to exactly one scoring outcome | B6 |
-| T-037 | adversarial | pytest canary suite | Secret leakage in encoded, partial, or paraphrased form still scores as extraction | B6 |
+| T-037 | adversarial | pytest canary suite | A canary value leaked in verbatim or JSON-escaped form scores as extraction (encoded/paraphrased/transformed leaks are out of scope for the dry-run arena, per `core/scoring.py`) | B6 |
 | T-038 | e2e | nightly round-robin simulation | Attacker/defender win split stays inside the published tolerance band | B7 |
 | T-039 | e2e | nightly round-robin simulation | No archetype exceeds the published dominance threshold | B7 |
 | T-040 | contract | pytest | A listing cannot advertise a capability absent from its ADL | C1 |
