@@ -36,11 +36,25 @@ task success beyond the engine's stated outcome nor touches reputation.
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 
 REDACTED = "[REDACTED:{field}]"
 WITHHELD = ("payload withheld: document declares no redaction rules; "
             "storing unredacted payloads is not permitted (fail closed)")
+WITHHELD_DECLARED = "payload withheld: document declares redaction mode 'withhold'"
+WITHHELD_UNKNOWN_MODE = ("payload withheld: unrecognized redaction mode {mode}; "
+                         "fail closed (an unknown directive is not silently "
+                         "downgraded to a weaker one)")
+
+# Arena-local redaction modes (PROVISIONAL, pending a canonical definition in
+# ADL v0.3 — finding F-013, filed upstream). Each non-withhold mode selects how
+# the DECLARED fields are represented; the value-scrub floor is applied to every
+# non-withhold mode, so no declared secret survives in any string regardless of
+# mode. An unrecognized mode fails closed (withheld) — the T10 bug was that the
+# mode was read but never honored, so every mode silently got mask+scrub.
+REDACTION_MODES = ("payload-redacted", "mask", "hash", "drop", "withhold")
+_FIELD_DIGEST_LEN = 16
 
 
 def declared_events(doc: dict) -> list[dict]:
@@ -111,11 +125,55 @@ def _scrub_values(obj, secrets: list):
     return obj
 
 
+def _drop_fields(obj, fields: set):
+    if isinstance(obj, dict):
+        return {k: _drop_fields(v, fields)
+                for k, v in obj.items() if k not in fields}
+    if isinstance(obj, list):
+        return [_drop_fields(item, fields) for item in obj]
+    return obj
+
+
+def _field_digest(value) -> str:
+    """Stable, opaque digest of a declared field's value (used by `hash` mode).
+    Canonical-JSON so structured values digest deterministically. Salt-free, so
+    it protects only high-entropy secrets — the same canary-entropy assumption
+    documented elsewhere."""
+    canon = json.dumps(value, sort_keys=True, separators=(",", ":"))
+    return "sha256:" + hashlib.sha256(canon.encode("utf-8")).hexdigest()[:_FIELD_DIGEST_LEN]
+
+
+def _hash_fields(obj, fields: set):
+    if isinstance(obj, dict):
+        return {k: (_field_digest(v) if k in fields
+                    else _hash_fields(v, fields)) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_hash_fields(item, fields) for item in obj]
+    return obj
+
+
 def redact_payload(payload: dict, rules: dict | None):
-    """Apply DECLARED redaction to a payload. No declaration -> the payload
-    is withheld entirely (fail closed), never stored unredacted."""
+    """Apply the DECLARED redaction to a payload (audit T10 — the declared mode
+    is now honored, not ignored). No declaration -> withheld entirely (fail
+    closed). The mode selects how the declared FIELDS are represented:
+
+      * payload-redacted / mask -> replace each declared field with a marker
+      * hash                    -> replace each declared field with a digest
+      * drop                    -> remove each declared field
+      * withhold                -> withhold the whole payload
+
+    An unrecognized mode fails closed (withheld). Every non-withhold mode then
+    applies the value-scrub floor, so a declared secret echoed under any other
+    key never survives, whatever the mode."""
     if rules is None:
         return {"withheld": WITHHELD}
+    mode = rules.get("mode")
+    if mode is None:
+        mode = "payload-redacted"  # backward-compatible default
+    if mode not in REDACTION_MODES:
+        return {"withheld": WITHHELD_UNKNOWN_MODE.format(mode=mode)}
+    if mode == "withhold":
+        return {"withheld": WITHHELD_DECLARED}
     fields = set(rules["fields"])
     secrets: list = []
     _collect_secret_values(payload, fields, secrets)
@@ -124,8 +182,13 @@ def redact_payload(payload: dict, rules: dict | None):
     # out of the longer secret and leave its tail exposed (audit: order-
     # dependent scrub leak). De-duplicated so the pass is stable.
     secrets = sorted({s for s in secrets if s}, key=lambda s: (-len(s), s))
-    masked = _mask_fields(copy.deepcopy(payload), fields)
-    return _scrub_values(masked, secrets)
+    if mode == "drop":
+        body = _drop_fields(copy.deepcopy(payload), fields)
+    elif mode == "hash":
+        body = _hash_fields(copy.deepcopy(payload), fields)
+    else:  # payload-redacted / mask
+        body = _mask_fields(copy.deepcopy(payload), fields)
+    return _scrub_values(body, secrets)
 
 
 def emit_events(trace: dict, doc_a: dict, doc_b: dict,
