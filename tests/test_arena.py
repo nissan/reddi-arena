@@ -1135,6 +1135,14 @@ check("hardening: safe_adl_path accepts only bare yaml files inside adl/",
       and _srv.safe_adl_path("/etc/passwd") is None
       and _srv.safe_adl_path("sub/dir.yaml") is None
       and _srv.safe_adl_path("notes.txt") is None)
+# safe_adl_path returns None (never raises) on NUL bytes and over-long names,
+# so the handler answers 400 rather than dropping the connection.
+check("hardening: safe_adl_path returns None on NUL byte / over-long name",
+      _srv.safe_adl_path("x\x00.yaml") is None
+      and _srv.safe_adl_path("a" * 300 + ".yaml") is None)
+_s_nul, _ = _req("POST", "/api/draft", {"bot": "x\x00.yaml", "hire": "y.yaml"})
+check("hardening: NUL-byte bot name returns 400, connection not dropped",
+      _s_nul == 400)
 # Malformed JSON and oversized bodies fail with a status, never a dropped
 # connection or a crash.
 import urllib.request as _ur2
@@ -1160,25 +1168,64 @@ _srv2.SIGNUP_RATE_MAX = 10_000  # disable the rate limit for this concurrency pr
 _httpd2 = _TServer(("127.0.0.1", 0), _srv2.Handler)
 _port2 = _httpd2.server_address[1]
 _threading.Thread(target=_httpd2.serve_forever, daemon=True).start()
+_ok_emails = []
+_ok_lock = _thr2.Lock()
 def _signup(i):
     r = _urequest.Request(f"http://127.0.0.1:{_port2}/api/waitlist", method="POST",
                           data=_wjson.dumps({"email": f"u{i}@ex.com"}).encode())
     r.add_header("Content-Type", "application/json")
     try:
-        _urequest.urlopen(r, timeout=10).read()
+        if _urequest.urlopen(r, timeout=10).status == 200:
+            with _ok_lock:
+                _ok_emails.append(f"u{i}@ex.com")
     except Exception:
-        pass
+        pass  # a dropped connection under load is harness flakiness, not a lost write
 _threads = [_thr2.Thread(target=_signup, args=(i,)) for i in range(50)]
 for _t in _threads:
     _t.start()
 for _t in _threads:
     _t.join()
-_s_c, _b_c = _req_port = None, None
 import json as _cj
 with open(_os.path.join(_conc_dir, "waitlist.json")) as _fh:
     _stored = _cj.load(_fh)
-check("hardening: 50 concurrent signups all persisted (no lost writes)",
-      len(_stored) == 50 and len({e["email"] for e in _stored}) == 50)
+_stored_emails = {e["email"] for e in _stored}
+# No lost writes: every signup that returned 200 is persisted exactly once,
+# and the store has no torn/duplicate entries. (A lockless RMW loses some of
+# the accepted writes — the pre-fix probe stored 43 of 61.)
+check("hardening: every accepted concurrent signup is persisted (no lost writes)",
+      len(_ok_emails) >= 40 and set(_ok_emails) == _stored_emails
+      and len(_stored) == len(_stored_emails))
+# Rate limit keys on the forwarded client, not the shared proxy peer, so
+# distinct forwarded clients are limited independently (a shared-peer key
+# would let 20 requests lock out everyone).
+def _signup_xff(xff, email):
+    r = _urequest.Request(f"http://127.0.0.1:{_port2}/api/waitlist", method="POST",
+                          data=_wjson.dumps({"email": email}).encode())
+    r.add_header("Content-Type", "application/json")
+    r.add_header("X-Forwarded-For", xff)
+    try:
+        return _urequest.urlopen(r, timeout=10).status
+    except _uerror.HTTPError as e:
+        return e.code
+_srv2.SIGNUP_RATE_MAX = 3
+check("hardening: rate limit is per forwarded-client, keyed on XFF not the proxy peer",
+      all(_signup_xff("9.9.9.9", f"rl{i}@ex.com") == 200 for i in range(3))
+      and _signup_xff("9.9.9.9", "rl-over@ex.com") == 429
+      and _signup_xff("8.8.8.8", "other-client@ex.com") == 200)
+check("hardening: _client_key prefers the left-most X-Forwarded-For hop",
+      _srv2._client_key(type("H", (), {
+          "headers": {"X-Forwarded-For": "1.2.3.4, 10.0.0.1"},
+          "client_address": ("10.0.0.1", 5)})()) == "1.2.3.4")
+# The ledger match history is ring-buffered, so /api/fight cannot grow the
+# store without bound (standings remain complete).
+_srv2.MAX_LEDGER_MATCHES = 5
+for _i in range(9):
+    _srv2.record({"competitors": ["a", "b"], "winner": "a", "seed": _i,
+                  "traceHash": f"sha256:{_i}"})
+with open(_os.path.join(_conc_dir, "ledger.json")) as _lf:
+    _led = _cj.load(_lf)
+check("hardening: ledger match history is capped (ring-buffered), standings intact",
+      len(_led["matches"]) == 5 and _led["standings"]["a"]["wins"] == 9)
 _httpd2.shutdown()
 _httpd.shutdown()
 

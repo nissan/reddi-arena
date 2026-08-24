@@ -58,7 +58,9 @@ ADMIN_TOKEN = os.environ.get("ARENA_ADMIN_TOKEN", "")
 # every unauthenticated write path is bounded.
 MAX_BODY_BYTES = 64 * 1024          # reject oversized request bodies (slowloris/mem)
 MAX_WAITLIST_ENTRIES = 100_000      # cap total stored signups (disk exhaustion)
-SIGNUP_RATE_MAX = 20                # per-IP signups allowed within the window
+MAX_LEDGER_MATCHES = 10_000         # ring-buffer match history (disk exhaustion)
+SIGNUP_RATE_MAX = 20                # per-client signups allowed within the window
+FIGHT_RATE_MAX = 60                 # per-client match writes allowed within the window
 SIGNUP_RATE_WINDOW = 60.0           # seconds
 SOCKET_READ_TIMEOUT = 15.0          # per-connection read timeout
 
@@ -81,11 +83,23 @@ def _read_json(path, default):
 
 def _write_json_atomic(path, obj):
     """Write via a temp file + os.replace so a concurrent reader never sees a
-    truncated file, and a crash mid-write cannot corrupt the store."""
+    truncated file, and a crash mid-write cannot corrupt the store. fsync the
+    data and the directory so the persistent-volume durability claim holds
+    across a power loss."""
     tmp = path.with_suffix(path.suffix + ".tmp")
     with open(tmp, "w") as fh:
         json.dump(obj, fh, indent=2)
+        fh.flush()
+        os.fsync(fh.fileno())
     os.replace(tmp, path)
+    try:
+        dir_fd = os.open(str(path.parent), os.O_DIRECTORY)
+        try:
+            os.fsync(dir_fd)
+        finally:
+            os.close(dir_fd)
+    except (OSError, AttributeError):
+        pass  # directory fsync is best-effort (not all platforms/filesystems)
 
 
 def safe_adl_path(name):
@@ -94,32 +108,60 @@ def safe_adl_path(name):
     The caller-supplied bot/hire fields reach open() — without this, an
     absolute path or ../ traversal reads arbitrary files (path traversal /
     DoS via /dev/zero). Only a bare .yaml/.yml file directly in adl/ passes.
+    Any malformed name (NUL byte, over-long) resolves to None, never an
+    exception — the caller relies on this to return a clean 400.
     """
     adl_dir = (ROOT / "adl").resolve()
-    if not isinstance(name, str) or not name or "/" in name or "\\" in name:
+    if not isinstance(name, str) or not name or "/" in name or "\\" in name \
+            or "\x00" in name or len(name) > 255:
         return None
-    candidate = (adl_dir / name).resolve()
-    if candidate.parent != adl_dir or candidate.suffix not in (".yaml", ".yml"):
-        return None
-    if not candidate.is_file():
+    try:
+        candidate = (adl_dir / name).resolve()
+        if candidate.parent != adl_dir or candidate.suffix not in (".yaml", ".yml"):
+            return None
+        if not candidate.is_file():
+            return None
+    except (OSError, ValueError):
         return None
     return candidate
 
 
-def _rate_ok(client_ip):
-    """Fixed-window per-IP limit for unauthenticated signups."""
+def _client_key(handler):
+    """Rate-limit key for the real end client. Behind Railway's edge the TCP
+    peer (client_address) is a fixed proxy IP, so keying on it makes the
+    limit global (20 requests lock out everyone). Prefer the left-most
+    X-Forwarded-For hop — the originating client. It is spoofable, so this
+    is a courtesy limit, not a security control; the hard bounds (body cap,
+    entry cap, ledger cap) do not depend on it."""
+    xff = handler.headers.get("X-Forwarded-For", "")
+    if xff:
+        first = xff.split(",")[0].strip()
+        if first:
+            return first[:64]
+    peer = handler.client_address[0] if handler.client_address else "?"
+    return peer[:64]
+
+
+def _rate_ok(client_key, limit=None):
+    """Fixed-window per-client limit for unauthenticated writes. `limit` is
+    the cap for the calling endpoint within SIGNUP_RATE_WINDOW; resolved at
+    call time so an operator/test override of the module constant applies."""
+    if limit is None:
+        limit = SIGNUP_RATE_MAX
     now = time.monotonic()
     with _RATE_LOCK:
-        hits = _SIGNUP_HITS.setdefault(client_ip, deque())
+        # Bound the map first: evict empty/stale buckets so a client rotating
+        # its forwarded-for value cannot grow it without limit.
+        if len(_SIGNUP_HITS) > 10_000:
+            for ip in [k for k, v in _SIGNUP_HITS.items()
+                       if not v or now - v[-1] > SIGNUP_RATE_WINDOW]:
+                _SIGNUP_HITS.pop(ip, None)
+        hits = _SIGNUP_HITS.setdefault(client_key, deque())
         while hits and now - hits[0] > SIGNUP_RATE_WINDOW:
             hits.popleft()
-        if len(hits) >= SIGNUP_RATE_MAX:
+        if len(hits) >= limit:
             return False
         hits.append(now)
-        # Opportunistic cleanup so the map cannot grow without bound.
-        if len(_SIGNUP_HITS) > 10_000:
-            for ip in [k for k, v in _SIGNUP_HITS.items() if not v]:
-                _SIGNUP_HITS.pop(ip, None)
         return True
 
 
@@ -269,6 +311,11 @@ def record(trace):
         else:
             for name in trace["competitors"]:
                 ledger["standings"][name]["draws"] += 1
+        # Ring-buffer the match history so an unauthenticated /api/fight loop
+        # cannot grow the store without bound (standings stay complete — they
+        # are O(competitors), not O(matches)).
+        if len(ledger["matches"]) > MAX_LEDGER_MATCHES:
+            ledger["matches"] = ledger["matches"][-MAX_LEDGER_MATCHES:]
         _write_json_atomic(LEDGER, ledger)
         return ledger
 
@@ -310,9 +357,6 @@ class Handler(BaseHTTPRequestHandler):
         auth = self.headers.get("Authorization", "")
         supplied = auth[7:] if auth.startswith("Bearer ") else ""
         return hmac.compare_digest(supplied, ADMIN_TOKEN)
-
-    def _client_ip(self):
-        return self.client_address[0] if self.client_address else "?"
 
     def _read_body(self):
         """Read and JSON-parse the request body, bounded. Returns (obj, None)
@@ -356,7 +400,8 @@ class Handler(BaseHTTPRequestHandler):
             # Operator-only read; never exposed without a configured token.
             if not self._admin_ok():
                 return self._send({"error": "not found"}, 404)
-            entries = json.load(open(WAITLIST)) if WAITLIST.exists() else []
+            with _STORE_LOCK:
+                entries = _read_json(WAITLIST, [])
             return self._send({"count": len(entries), "entries": entries,
                                "persistent": PERSISTENT})
         return self._send({"error": "not found"}, 404)
@@ -392,7 +437,7 @@ class Handler(BaseHTTPRequestHandler):
             })
 
         if path == "/api/waitlist":
-            if not _rate_ok(self._client_ip()):
+            if not _rate_ok("signup:" + _client_key(self)):
                 return self._send({"ok": False, "error": "rate limited"}, 429)
             email = (req.get("email") or "").strip().lower()
             if not isinstance(email, str) or "@" not in email \
@@ -456,6 +501,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(proj)
 
         if path == "/api/fight":
+            if not _rate_ok("fight:" + _client_key(self), limit=FIGHT_RATE_MAX):
+                return self._send({"error": "rate limited"}, 429)
             a = self._load_bot(req.get("botA"))
             b = self._load_bot(req.get("botB"))
             if a is None or b is None:
