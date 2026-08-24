@@ -143,6 +143,13 @@ def cmd_market(args):
 def cmd_draft(args):
     comp = load_adl(args.bot)
     merc = load_adl(args.hire)
+    # Reject an unknown class up front — otherwise evaluate_hire maps it to a
+    # ceiling-0 default and prints a misleading "breaching <garbage> ceiling 0"
+    # REFUSED (audit review consistency nit; matches the `fight` guard).
+    if args._class not in CLASS_NAMES:
+        print(f"{C.RED}error{C.R}: --class {args._class!r} is not a known class; "
+              f"choose one of {sorted(CLASS_NAMES)}")
+        return 2
     res = evaluate_hire(comp, merc, entered_class=args._class)
     head = f"{C.G}ALLOWED{C.R}" if res.allowed else f"{C.RED}REFUSED{C.R}"
     print(f"{C.B}DRAFT{C.R}  {comp['metadata']['name']} + {merc['metadata']['name']}  [{head}]")
