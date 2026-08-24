@@ -96,8 +96,23 @@ def classify(au: int) -> str:
     return "Heavyweight"
 
 
+def _lst(x) -> list:
+    """Coerce a should-be-list to a list — a malformed (non-list) collection
+    reads as empty rather than raising 'not iterable' (audit E2)."""
+    return x if isinstance(x, list) else []
+
+
+def _key(x, default: str) -> str:
+    """Coerce an enum-lookup value to a hashable str; a non-str (list/dict)
+    would raise 'unhashable type' as a dict key / set member (audit E2)."""
+    return x if isinstance(x, str) else default
+
+
 def _tier(value: Any, divisor: int, per: int) -> int:
-    if not isinstance(value, (int, float)):
+    # inf/nan are floats but not real declarations — int(ceil(inf)) overflows
+    # (audit finding, non-finite bypass). Treat them as unreadable -> 0.
+    if not isinstance(value, (int, float)) or isinstance(value, bool) \
+            or not math.isfinite(value):
         return 0
     return int(math.ceil(value / divisor)) * per
 
@@ -106,11 +121,12 @@ def _referenced_policy_ids(harness: dict) -> set[str]:
     """Only policies actually referenced by a capability earn the hygiene credit."""
     referenced: set[str] = set()
     for collection in ("tools", "functions"):
-        for item in harness.get(collection) or []:
+        for item in _lst(harness.get(collection)):
             if not isinstance(item, dict):
                 continue
-            for ref in item.get("policyRefs") or []:
-                referenced.add(ref)
+            for ref in _lst(item.get("policyRefs")):
+                if isinstance(ref, str):
+                    referenced.add(ref)
     return referenced
 
 
@@ -140,9 +156,10 @@ def _l1(doc: dict) -> bool:
 
 def _l2(doc: dict) -> bool:
     harness = _m(doc.get("harness"))
-    tools = harness.get("tools") or []
-    policies = harness.get("policies") or []
-    covered = {p.get("resource") for p in policies if isinstance(p, dict)}
+    tools = _lst(harness.get("tools"))
+    policies = _lst(harness.get("policies"))
+    covered = {p.get("resource") for p in policies
+               if isinstance(p, dict) and isinstance(p.get("resource"), str)}
     obs = _m(harness.get("observability"))
     return bool(tools and obs.get("events")
                 and all(isinstance(t, dict) and f"tool:{t.get('id')}" in covered
@@ -155,7 +172,7 @@ def _l3(doc: dict) -> bool:
     # only the latter (finding F-012, reddiagent-lab#450).
     obs = _m(_m(doc.get("harness")).get("observability"))
     conf = _m(doc.get("conformance"))
-    events = obs.get("events") or []
+    events = _lst(obs.get("events"))
     evidenced = bool(conf.get("evidenceRefs")
                      or (events and all(isinstance(e, dict) and e.get("evidenceRef")
                                         for e in events)))
@@ -272,55 +289,56 @@ def weigh(doc: dict, hires: list[dict] | None = None) -> dict:
         if reqs.get(key) is True:
             lines.append((f"chassis.req.{key}", au))
 
-    for modality in reqs.get("modalities") or []:
-        au = MODALITY_AU.get(modality, 12)
+    for modality in _lst(reqs.get("modalities")):
+        au = MODALITY_AU.get(_key(modality, ""), 12)
         if au:
             lines.append((f"chassis.modality.{modality}", au))
 
-    for tool in harness.get("tools") or []:
+    for tool in _lst(harness.get("tools")):
         if not isinstance(tool, dict):
             continue
         tool_au = TOOL_BASE_AU
-        mode = _m(tool.get("sideEffects")).get("mode") or "none"
+        mode = _key(_m(tool.get("sideEffects")).get("mode"), "none")
         tool_au += SIDE_EFFECT_AU.get(mode, 14)
         if tool.get("auditLevel") == "full":
             tool_au += AUDIT_FULL_AU
         lines.append((f"tool.{tool.get('id', '?')}", tool_au))
 
-    for fn in harness.get("functions") or []:
+    for fn in _lst(harness.get("functions")):
         if isinstance(fn, dict):
             lines.append((f"function.{fn.get('id', '?')}", FUNCTION_AU))
 
-    for skill in harness.get("skills") or []:
+    for skill in _lst(harness.get("skills")):
         if isinstance(skill, dict):
             lines.append((f"skill.{skill.get('id', '?')}", SKILL_AU))
 
-    for src in harness.get("dataSources") or []:
+    for src in _lst(harness.get("dataSources")):
         if not isinstance(src, dict):
             continue
-        src_au = SOURCE_TYPE_AU.get(src.get("type"), 8)
-        src_au += TRUST_AU.get(src.get("trust"), 6)
+        src_au = SOURCE_TYPE_AU.get(_key(src.get("type"), ""), 8)
+        src_au += TRUST_AU.get(_key(src.get("trust"), ""), 6)
         lines.append((f"source.{src.get('id', '?')}", src_au))
 
-    memory_mode = _m(harness.get("memory")).get("mode", "session")
+    memory_mode = _key(_m(harness.get("memory")).get("mode", "session"), "session")
     if MEMORY_AU.get(memory_mode, 25):
         lines.append((f"memory.{memory_mode}", MEMORY_AU.get(memory_mode, 25)))
 
     referenced = _referenced_policy_ids(harness)
     credit = 0
-    for policy in harness.get("policies") or []:
+    for policy in _lst(harness.get("policies")):
         if not isinstance(policy, dict):
             continue
         pid = policy.get("id")
         # Deny-effect policies always earn credit; allow-policies must be
         # referenced by a declared capability so no-op padding cannot farm credit.
-        if policy.get("effect") == "deny" or pid in referenced:
+        # (pid is only tested for set membership when it is a hashable str.)
+        if policy.get("effect") == "deny" or (isinstance(pid, str) and pid in referenced):
             credit += POLICY_CREDIT_AU
     credit = max(credit, POLICY_CREDIT_FLOOR)
     if credit:
         lines.append(("policy.hygiene-credit", credit))
 
-    intents = _m(_m(doc.get("extensions")).get("x402")).get("intents") or []
+    intents = _lst(_m(_m(doc.get("extensions")).get("x402")).get("intents"))
     for intent in intents:
         if isinstance(intent, dict):
             lines.append((f"x402.intent.{intent.get('id', '?')}", PAYMENT_INTENT_AU))

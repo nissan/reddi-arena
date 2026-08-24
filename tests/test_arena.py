@@ -325,8 +325,57 @@ for _label, _fn in _malformed.items():
                          and _tf["traceHash"].startswith("sha256:"))
         except Exception:
             _fault_ok = False
-check("fault-hardening: every malformed declaration resolves to a terminal trace, never crashes",
+check("fault-hardening: curated malformed declarations resolve to a terminal trace",
       _fault_ok)
+
+# Typed-fuzz sweep: set a hostile value type at every nested declaration path
+# and require a terminal trace (never an exception). Covers the value classes
+# the reviewer flagged — non-dict, non-list, unhashable, non-finite, non-str
+# name — not just the curated shapes above.
+_BAD_VALUES = [None, 3.5, "x", [1, 2], {"k": 1}, True, float("inf"),
+               float("nan"), [[1]], "999999"]
+_PATHS = [
+    ("metadata",), ("metadata", "name"), ("model",), ("model", "requirements"),
+    ("model", "requirements", "contextWindow"),
+    ("model", "requirements", "maxOutputTokens"),
+    ("model", "requirements", "modalities"), ("harness",), ("harness", "tools"),
+    ("harness", "policies"), ("harness", "runtime"),
+    ("harness", "runtime", "network"), ("harness", "observability"),
+    ("harness", "memory"), ("extensions",), ("extensions", "x-arena"),
+    ("extensions", "x-arena", "strategy"),
+    ("extensions", "x-arena", "strategy", "attack"), ("conformance",),
+]
+
+def _set_path(doc, path, value):
+    cur = doc
+    for k in path[:-1]:
+        nxt = cur.get(k) if isinstance(cur, dict) else None
+        if not isinstance(nxt, dict):
+            nxt = {}
+            if isinstance(cur, dict):
+                cur[k] = nxt
+        cur = nxt
+    if isinstance(cur, dict):
+        cur[path[-1]] = value
+
+_fuzz_crashes = []
+for _path in _PATHS:
+    for _val in _BAD_VALUES:
+        _d = _cp.deepcopy(DEF)
+        _set_path(_d, _path, _val)
+        try:
+            _t = run_vault_match(_d, RAID, seed=2)
+            if not (_t["lifecycle"]["terminal"] and _t["traceHash"].startswith("sha256:")):
+                _fuzz_crashes.append((_path, type(_val).__name__, "non-terminal"))
+        except Exception as _e:
+            _fuzz_crashes.append((_path, type(_val).__name__, type(_e).__name__))
+check(f"fault-hardening: typed-fuzz sweep — every nested bad value resolves, never crashes "
+      f"({len(_PATHS) * len(_BAD_VALUES)} cases)",
+      not _fuzz_crashes)
+# A malformed hire document must not crash the match either (audit minor 4).
+check("fault-hardening: a malformed hire document does not crash the match",
+      all(run_vault_match(DEF, RAID, seed=2, hire_a=_hv)["lifecycle"]["terminal"]
+          for _hv in ({}, {"metadata": "x"}, {"metadata": {"name": 3.5}}, "not-a-doc")))
 # The clearly-unreadable declarations (strategy/fuel/name faults) forfeit
 # pre-turn specifically, rather than merely not crashing.
 check("fault-hardening: unreadable strategy/fuel/name faults forfeit before turn 1",

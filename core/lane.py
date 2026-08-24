@@ -34,13 +34,16 @@ class ExecutionLane:
         # check forfeits such a document; the lane must not crash constructing.
         def _m(x):
             return x if isinstance(x, dict) else {}
-        self.subject = "agent:" + (_m(doc.get("metadata")).get("name") or "unknown")
+        def _lst(x):
+            return x if isinstance(x, list) else []
+        _name = _m(doc.get("metadata")).get("name")
+        self.subject = "agent:" + (_name if isinstance(_name, str) and _name else "unknown")
         harness = _m(doc.get("harness"))
-        self.tools = {t.get("id"): t for t in harness.get("tools") or []
+        self.tools = {t.get("id"): t for t in _lst(harness.get("tools"))
                       if isinstance(t, dict)}
-        self.policies = [p for p in (harness.get("policies") or []) if isinstance(p, dict)]
+        self.policies = [p for p in _lst(harness.get("policies")) if isinstance(p, dict)]
         network = _m(_m(harness.get("runtime")).get("network"))
-        self.egress_allowlist = list(network.get("allowlist") or [])
+        self.egress_allowlist = list(_lst(network.get("allowlist")))
         self.events: list[dict] = []
         self._invocations: dict[str, int] = {}
         self.bound_hash = bound_hash
@@ -100,7 +103,7 @@ def find_tool(doc: dict, fragment: str) -> str | None:
     skipped rather than raising."""
     harness = doc.get("harness") if isinstance(doc, dict) else None
     tools = harness.get("tools") if isinstance(harness, dict) else None
-    for tool in tools or []:
+    for tool in (tools if isinstance(tools, list) else []):
         if isinstance(tool, dict) and fragment.lower() in str(tool.get("id", "")).lower():
             return tool.get("id")
     return None

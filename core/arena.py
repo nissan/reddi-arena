@@ -195,8 +195,11 @@ def _dig(doc, *keys):
 
 
 def _is_number(x) -> bool:
-    # bool is an int subclass but is never a valid numeric declaration here.
-    return isinstance(x, (int, float)) and not isinstance(x, bool)
+    # bool is an int subclass but is never a valid numeric declaration here;
+    # inf/nan are floats but overflow int() — treat as unreadable.
+    import math
+    return (isinstance(x, (int, float)) and not isinstance(x, bool)
+            and math.isfinite(x))
 
 
 def _read_strategy(doc: dict) -> tuple[dict | None, str | None]:
@@ -375,7 +378,8 @@ def run_vault_match(bot_a: dict, bot_b: dict, seed: int = 0,
     # traps the opponent would otherwise land. Bounded, declared, honest.
     defense_bonus = [0, 0]
     for i, hire in enumerate([hire_a, hire_b]):
-        if hire and "source-auditor" in hire["metadata"]["name"]:
+        hire_name = _competitor_name(hire) if hire else None
+        if hire_name and "source-auditor" in hire_name:
             defense_bonus[i] = 15
 
     # Deterministic pseudo-random stream from the seed (LCG; not for crypto).
