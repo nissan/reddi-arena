@@ -277,6 +277,35 @@ def _m(x) -> dict:
     return x if isinstance(x, dict) else {}
 
 
+def binding_surface(doc: dict) -> dict:
+    """Canonical projection of the harness surface the ExecutionLane enforces
+    but the AU formula does not price (audit L1). Two documents that weigh
+    identically but differ in egress allowlist or policy targeting produce
+    different binding surfaces, so their capability hashes differ and E1I
+    detects the swap. Deterministic: sorted, hashable-coerced, no clock."""
+    harness = _m(doc.get("harness"))
+    network = _m(_m(harness.get("runtime")).get("network"))
+    egress = sorted(str(h) for h in _lst(network.get("allowlist"))
+                    if isinstance(h, (str, int, float)) and not isinstance(h, bool))
+    policies = []
+    for p in _lst(harness.get("policies")):
+        if not isinstance(p, dict):
+            continue
+        policies.append({
+            "resource": _key(p.get("resource"), ""),
+            "action": _key(p.get("action"), ""),
+            "effect": _key(p.get("effect"), ""),
+        })
+    # Sort policies canonically so key order in the document never changes the
+    # surface, only the actual (resource, action, effect) triples do.
+    policies.sort(key=lambda x: (x["resource"], x["action"], x["effect"]))
+    return {
+        "egressAllowlist": egress,
+        "egressDenyByDefault": bool(network.get("denyByDefault")),
+        "policyTargets": policies,
+    }
+
+
 def weigh(doc: dict, hires: list[dict] | None = None) -> dict:
     """Return a full weigh-in certificate for an ADL document."""
     lines: list[tuple[str, int]] = []
@@ -385,6 +414,12 @@ def weigh(doc: dict, hires: list[dict] | None = None) -> dict:
         # covered by the capability hash below, so it is auditable and
         # cannot be swapped after weigh-in.
         "tierVerdict": tier_verdict(doc),
+        # L1 (audit): the security surface the lane ENFORCES — egress allowlist
+        # and per-policy targeting — but that weight IGNORES. Folding a
+        # canonical projection into the hashed certificate makes E1I binding
+        # detect an egress or policy-target change between weigh-in and
+        # fielding, which the AU-only hash could not see.
+        "bindingSurface": binding_surface(doc),
     }
     canonical = json.dumps(
         {k: v for k, v in certificate.items() if k != "capabilityHash"},

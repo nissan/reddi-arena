@@ -211,6 +211,38 @@ check("T-079 trace bound hashes match the weigh-in certificates",
       _bt["boundHash"][DEF["metadata"]["name"]] == _w_e1i(DEF)["capabilityHash"]
       and _bt["boundHash"][RAID["metadata"]["name"]] == _w_e1i(RAID)["capabilityHash"])
 
+# L1/L5 (audit): the capability hash covers the security surface the lane
+# enforces — egress allowlist and policy targeting — which the AU formula
+# ignores. Changing either between weigh-in and fielding is now an escape.
+from weigh_in import binding_surface as _bsurf
+_weighed_egress = _cp.deepcopy(DEF)
+_fielded_egress = _cp.deepcopy(DEF)
+_fielded_egress.setdefault("harness", {}).setdefault("runtime", {}) \
+    .setdefault("network", {})["allowlist"] = ["evil.example.com"]
+_fielded_egress["harness"]["runtime"]["network"]["denyByDefault"] = False
+check("L1 an egress-allowlist change alters the capability hash and escapes",
+      _w_e1i(_weighed_egress)["capabilityHash"] != _w_e1i(_fielded_egress)["capabilityHash"]
+      and ExecutionLane(_fielded_egress, _w_e1i(_weighed_egress)["capabilityHash"],
+                        _w_e1i(_fielded_egress)["capabilityHash"]).escaped)
+_swapped_policy = _cp.deepcopy(DEF)
+for _p in _swapped_policy["harness"]["policies"]:
+    if str(_p.get("resource", "")).startswith("tool:"):
+        _p["resource"] = "tool:some-other-tool"
+        break
+check("L5 a policy-target swap (same count/effect) alters the hash and escapes",
+      _w_e1i(DEF)["capabilityHash"] != _w_e1i(_swapped_policy)["capabilityHash"]
+      and ExecutionLane(_swapped_policy, _w_e1i(DEF)["capabilityHash"],
+                        _w_e1i(_swapped_policy)["capabilityHash"]).escaped)
+check("L1 binding surface is deterministic and key-order insensitive",
+      _bsurf(DEF) == _bsurf(_cp.deepcopy(DEF))
+      and _bsurf({"harness": {"policies": [
+          {"effect": "allow", "action": "invoke", "resource": "tool:x"}]}})
+      == _bsurf({"harness": {"policies": [
+          {"resource": "tool:x", "action": "invoke", "effect": "allow"}]}}))
+check("L1 the binding surface does not change the AU weight",
+      _w_e1i(_fielded_egress)["soloAU"] == _w_e1i(DEF)["soloAU"]
+      and _w_e1i(_swapped_policy)["soloAU"] == _w_e1i(DEF)["soloAU"])
+
 # T-077 — a capability absent from the weighed hash cannot execute: weigh the
 # honest document, then field a mutated one with a smuggled tool.
 _stale_cert = _w_e1i(DEF)
