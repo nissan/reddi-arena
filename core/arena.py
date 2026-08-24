@@ -303,6 +303,25 @@ def run_vault_match(bot_a: dict, bot_b: dict, seed: int = 0,
     lc = MatchLifecycle()
     lc.advance("weighing", "computing weigh-in certificates for both competitors")
 
+    # Audit E4/T8: the trace's per-competitor evidence maps (laneEvents,
+    # boundHash, fuelAccounting) are keyed by name, so two competitors sharing
+    # a name would silently collapse one bot's evidence into the other's.
+    # Distinct names are required; a collision voids the match before any
+    # evidence is built.
+    # Guard on the EFFECTIVE names (after placeholder assignment), not the raw
+    # declared names: a document literally named "unnamed-competitor-1" against
+    # an unnamed opponent collides on the effective key even though the raw
+    # names differ (audit review). Two unnamed docs stay distinct (their
+    # placeholders are index 0 vs 1), so this never false-voids.
+    if names[0] == names[1]:
+        lc.advance("binding", "name-collision check")
+        _reason = (f"both competitors resolve to the same name {names[0]!r}; "
+                   f"match void (names must be distinct for auditable evidence)")
+        lc.advance("void", _reason)
+        return _finalize(names, [], -1, _reason, [True, True], [0, 0],
+                         [0, 0], seed, None, None, lc, None,
+                         outcome_kind="void", at_fault=list(names))
+
     # B1: every capability use in the match routes through each bot's bounded
     # execution lane — declared, policy-matched, locally bound, or refused.
     # Lane decisions are recorded as evidence; they never alter the seeded
@@ -339,48 +358,58 @@ def run_vault_match(bot_a: dict, bot_b: dict, seed: int = 0,
         if lanes[0].escaped and lanes[1].escaped:
             winner, reason = -1, ("both fielded documents differ from their "
                                   "weighed certificates; match void")
+            _kind, _fault = "void", list(names)
             lc.advance("void", reason)
         else:
             escapee = 0 if lanes[0].escaped else 1
             winner = 1 - escapee
             reason = (f"{names[escapee]} forfeits: fielded document does not "
                       f"match its weighed certificate (binding escape)")
+            _kind, _fault = "forfeit", [names[escapee]]
             lc.advance("forfeit", reason)
         return _finalize(names, [], winner, reason, [True, True], fuel,
-                         list(fuel), seed, lanes, bound_hashes, lc, meters)
+                         list(fuel), seed, lanes, bound_hashes, lc, meters,
+                         outcome_kind=_kind, at_fault=_fault)
 
     if faults[0] or faults[1]:
         if faults[0] and faults[1]:
             winner = -1
             reason = (f"both competitors scratched — {names[0]}: {faults[0]}; "
                       f"{names[1]}: {faults[1]}; match void")
+            _kind, _fault = "void", list(names)
             lc.advance("void", reason)
         else:
             faulty = 0 if faults[0] else 1
             winner = 1 - faulty
             reason = f"{names[faulty]} forfeits before turn 1: {faults[faulty]}"
+            _kind, _fault = "forfeit", [names[faulty]]
             lc.advance("forfeit", reason)
         return _finalize(names, [], winner, reason, [True, True], fuel,
-                         list(fuel), seed, lanes, bound_hashes, lc, meters)
+                         list(fuel), seed, lanes, bound_hashes, lc, meters,
+                         outcome_kind=_kind, at_fault=_fault)
 
     # B4 / T-029: the budget-check eval gate runs at the DECLARED thresholds
     # before any turn — a bot that would exceed its own declaration the
     # moment it plays fails here as a defined pre-turn outcome.
     gates = [budget_gate(bot_a, fuel[0]), budget_gate(bot_b, fuel[1])]
     if not (gates[0]["passed"] and gates[1]["passed"]):
+        gate_failed = [names[i] for i in range(2) if not gates[i]["passed"]]
         if not gates[0]["passed"] and not gates[1]["passed"]:
             winner = -1
             reason = (f"both competitors fail the budget gate — {names[0]}: "
                       f"{gates[0]['reason']}; {names[1]}: {gates[1]['reason']}; "
                       f"match void")
+            _kind, _fault = "void", list(names)
             lc.advance("void", reason)
         else:
             gated = 0 if not gates[0]["passed"] else 1
             winner = 1 - gated
             reason = f"{names[gated]} forfeits before turn 1: {gates[gated]['reason']}"
+            _kind, _fault = "forfeit", [names[gated]]
             lc.advance("forfeit", reason)
         return _finalize(names, [], winner, reason, [True, True], fuel,
-                         list(fuel), seed, lanes, bound_hashes, lc, meters)
+                         list(fuel), seed, lanes, bound_hashes, lc, meters,
+                         outcome_kind=_kind, at_fault=_fault, gate_failed=gate_failed)
 
     lc.advance("in-progress", "binding and declarations verified; turn loop opened")
     probe_tool = [find_tool(bot_a, "probe"), find_tool(bot_b, "probe")]
@@ -434,7 +463,8 @@ def run_vault_match(bot_a: dict, bot_b: dict, seed: int = 0,
                          else "could not afford the turn") + ")")
             lc.advance("forfeit", reason)
             return _finalize(names, turns, winner, reason, secret_held, fuel,
-                             _remaining(meters), seed, lanes, bound_hashes, lc, meters)
+                             _remaining(meters), seed, lanes, bound_hashes, lc, meters,
+                             outcome_kind="forfeit", at_fault=[names[attacker]])
 
         probe = strat[attacker]["attack"] + nxt(20) - 10
         defense = strat[defender]["defense"] + defense_bonus[defender] + nxt(20) - 10
@@ -450,7 +480,8 @@ def run_vault_match(bot_a: dict, bot_b: dict, seed: int = 0,
             reason = f"{names[attacker]} extracted {names[defender]}'s secret on turn {n}"
             lc.advance("decided", reason)
             return _finalize(names, turns, winner, reason, secret_held, fuel,
-                             _remaining(meters), seed, lanes, bound_hashes, lc, meters)
+                             _remaining(meters), seed, lanes, bound_hashes, lc, meters,
+                             outcome_kind="extraction", at_fault=[])
 
         if seal_tool[defender]:
             lanes[defender].invoke(seal_tool[defender])
@@ -461,13 +492,16 @@ def run_vault_match(bot_a: dict, bot_b: dict, seed: int = 0,
     if fuel_left[0] != fuel_left[1]:
         winner = 0 if fuel_left[0] > fuel_left[1] else 1
         reason = f"turn limit; {names[winner]} won on fuel efficiency"
+        _kind = "fuel"
         lc.advance("decided", reason)
     else:
         winner = -1
         reason = "turn limit; both secrets held; draw"
+        _kind = "draw"
         lc.advance("draw", reason)
     return _finalize(names, turns, winner, reason, secret_held, fuel, fuel_left,
-                     seed, lanes, bound_hashes, lc, meters)
+                     seed, lanes, bound_hashes, lc, meters,
+                     outcome_kind=_kind, at_fault=[])
 
 
 def _remaining(meters) -> list[int]:
@@ -475,7 +509,16 @@ def _remaining(meters) -> list[int]:
 
 
 def _finalize(names, turns, winner, reason, secret_held, fuel, fuel_left, seed,
-              lanes=None, bound_hashes=None, lifecycle=None, meters=None) -> dict:
+              lanes=None, bound_hashes=None, lifecycle=None, meters=None,
+              outcome_kind=None, at_fault=None, gate_failed=None) -> dict:
+    # Audit E5/T3/T6: the machine-readable outcome and the at-fault competitors
+    # are STRUCTURED fields, so downstream consumers (scoring, emit, audit,
+    # chain settlement) never parse the human-readable `reason` string —
+    # schema-valid names could otherwise spoof "extracted" or frame the
+    # innocent via substring matches. `result` distinguishes void from draw.
+    result = {"extraction": "decisive", "fuel": "decisive", "forfeit": "decisive",
+              "draw": "draw", "void": "void"}.get(outcome_kind,
+              "draw" if winner < 0 else "decisive")
     trace = {
         "format": "vault",
         "seed": seed,
@@ -485,7 +528,13 @@ def _finalize(names, turns, winner, reason, secret_held, fuel, fuel_left, seed,
         "fuelStart": fuel,
         "fuelLeft": fuel_left,
         "winner": names[winner] if winner >= 0 else None,
-        "result": "draw" if winner < 0 else "decisive",
+        "result": result,
+        "outcomeKind": outcome_kind,
+        "atFault": list(at_fault or []),
+        # Structural marker for WHICH competitors failed the pre-turn budget
+        # gate, so the emitted eval.checked event never has to parse the reason
+        # prose to label the gate (audit review minor).
+        "budgetGateFailed": list(gate_failed or []),
         "reason": reason,
         "rail": ARENA_RAIL,
         "prizeCurrency": ARENA_CURRENCY,

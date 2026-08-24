@@ -118,10 +118,16 @@ def emit_events(trace: dict, doc_a: dict, doc_b: dict,
     emit("trace.started", None, {"seed": trace["seed"],
                                  "competitors": trace["competitors"]})
     reason = str(trace.get("reason", ""))
+    # Attribution reads the STRUCTURED atFault list, never `name in reason` —
+    # a prefix name would otherwise frame the innocent (audit T6).
+    at_fault_set = set(trace.get("atFault") or [])
+    # Budget-gate pass/fail is read from the STRUCTURED budgetGateFailed list,
+    # never from a reason substring — a name containing "budget gate" would
+    # otherwise mislabel a sputter forfeit (audit review minor).
+    gate_failed_set = set(trace.get("budgetGateFailed") or [])
     for name in trace["competitors"]:
-        gate_failed = "budget gate" in reason and name in reason
         emit("eval.checked", name, {"gate": "budget-check",
-                                    "passed": not gate_failed})
+                                    "passed": name not in gate_failed_set})
     for name in trace["competitors"]:
         for e in (trace.get("laneEvents") or {}).get(name) or []:
             emit("policy.checked", name,
@@ -130,7 +136,7 @@ def emit_events(trace: dict, doc_a: dict, doc_b: dict,
                 emit("tool.called", name, {"resource": e["resource"]})
     terminal = (trace.get("lifecycle") or {}).get("state")
     for name in trace["competitors"]:
-        at_fault = terminal in ("forfeit", "void") and name in reason
+        at_fault = name in at_fault_set
         event = "task.failed" if at_fault else "task.completed"
         payload = {"outcome": terminal, "reason": reason,
                    "winner": trace.get("winner")}
