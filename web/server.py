@@ -36,7 +36,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 from core import chain  # noqa: E402
 from core.arena import (  # noqa: E402
     run_vault_match, evaluate_hire, weigh_competitor, advertised_price,
-    load_adl, ARENA_CURRENCY, ARENA_RAIL,
+    load_adl, ARENA_CURRENCY, ARENA_RAIL, CLASS_NAMES,
 )
 
 # Writable data directory. Railway's filesystem is ephemeral unless a volume is
@@ -523,9 +523,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send({"error": "unknown hire"}, 400)
             # An entered class in the request enforces the draft ceiling: an
             # illegal fielding forfeits before turn 1 (audit E7/L2). Absent, the
-            # hire plays (backward-compatible).
-            ca = req.get("classA") if isinstance(req.get("classA"), str) else None
-            cb = req.get("classB") if isinstance(req.get("classB"), str) else None
+            # hire plays (backward-compatible). A present-but-unknown class is a
+            # client error (400), never a silent forfeit.
+            ca, cb = req.get("classA"), req.get("classB")
+            for cls in (ca, cb):
+                if cls is not None and (not isinstance(cls, str) or cls not in CLASS_NAMES):
+                    return self._send({"error": "unknown class"}, 400)
             trace = run_vault_match(a, b, seed=self._seed(req, 0), hire_a=ha, hire_b=hb,
                                     entered_a=ca, entered_b=cb)
             record(trace)

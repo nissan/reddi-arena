@@ -32,7 +32,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 from core import chain  # noqa: E402
 from core.arena import (  # noqa: E402
     run_vault_match, evaluate_hire, weigh_competitor, advertised_price,
-    load_adl, LEAGUE_TIERS, ARENA_CURRENCY, ARENA_RAIL,
+    load_adl, LEAGUE_TIERS, ARENA_CURRENCY, ARENA_RAIL, CLASS_NAMES,
 )
 
 LEDGER = ROOT / "core" / "ledger.json"
@@ -160,9 +160,17 @@ def cmd_fight(args):
     hire_b = load_adl(args.hire_b) if args.hire_b else None
     # When an entered class is stated, run_vault_match enforces the draft
     # class ceiling — an illegal fielding forfeits before turn 1 (audit E7/L2).
+    # Reject an unknown class here so a typo is a clear CLI error, not a silent
+    # forfeit inside the match.
+    class_a = getattr(args, "class_a", None)
+    class_b = getattr(args, "class_b", None)
+    for flag, cls in (("--class-a", class_a), ("--class-b", class_b)):
+        if cls is not None and cls not in CLASS_NAMES:
+            print(f"{C.RED}error{C.R}: {flag} {cls!r} is not a known class; "
+                  f"choose one of {sorted(CLASS_NAMES)}")
+            return 2
     trace = run_vault_match(a, b, seed=args.seed, hire_a=hire_a, hire_b=hire_b,
-                            entered_a=getattr(args, "class_a", None),
-                            entered_b=getattr(args, "class_b", None))
+                            entered_a=class_a, entered_b=class_b)
 
     print(f"{C.B}VAULT MATCH{C.R}  {trace['competitors'][0]} {C.DIM}vs{C.R} {trace['competitors'][1]}"
           f"  {C.DIM}seed {trace['seed']}{C.R}")
