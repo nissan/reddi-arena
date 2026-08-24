@@ -283,7 +283,9 @@ class Turn:
 def run_vault_match(bot_a: dict, bot_b: dict, seed: int = 0,
                     hire_a: dict | None = None, hire_b: dict | None = None,
                     max_turns: int = 12,
-                    cert_a: dict | None = None, cert_b: dict | None = None) -> dict:
+                    cert_a: dict | None = None, cert_b: dict | None = None,
+                    entered_a: str | None = None,
+                    entered_b: str | None = None) -> dict:
     """
     Deterministic Vault match. Given identical inputs and seed, always returns
     an identical result and trace. This is the substrate the replay renders.
@@ -389,6 +391,38 @@ def run_vault_match(bot_a: dict, bot_b: dict, seed: int = 0,
             winner = 1 - faulty
             reason = f"{names[faulty]} forfeits before turn 1: {faults[faulty]}"
             _kind, _fault = "forfeit", [names[faulty]]
+            lc.advance("forfeit", reason)
+        return _finalize(names, [], winner, reason, [True, True], fuel,
+                         list(fuel), seed, lanes, bound_hashes, lc, meters,
+                         outcome_kind=_kind, at_fault=_fault)
+
+    # Draft enforcement (audit E7/L2): a hire that breaches the weight class its
+    # employer ENTERED is an illegal fielding — a pre-turn forfeit, not a played
+    # advantage. The draft class-ceiling check used to be advisory: run_vault_match
+    # played any hire regardless. Now, when the caller states the entered class,
+    # an over-ceiling fielding forfeits before turn 1 (both illegal -> void). With
+    # no entered class stated — internal parity/balance runs measuring hire effect
+    # — the hire plays as before, so those results are unchanged.
+    draft_faults = [None, None]
+    for i, (bot, hire, entered) in enumerate(
+            [(bot_a, hire_a, entered_a), (bot_b, hire_b, entered_b)]):
+        if isinstance(hire, dict) and entered is not None:
+            verdict = evaluate_hire(bot, hire, entered)
+            if not verdict.allowed:
+                draft_faults[i] = verdict.reason
+    if draft_faults[0] or draft_faults[1]:
+        if draft_faults[0] and draft_faults[1]:
+            winner = -1
+            reason = (f"both competitors field illegal hires — {names[0]}: "
+                      f"{draft_faults[0]}; {names[1]}: {draft_faults[1]}; match void")
+            _kind, _fault = "void", list(names)
+            lc.advance("void", reason)
+        else:
+            bad = 0 if draft_faults[0] else 1
+            winner = 1 - bad
+            reason = (f"{names[bad]} forfeits before turn 1: illegal fielding — "
+                      f"{draft_faults[bad]}")
+            _kind, _fault = "forfeit", [names[bad]]
             lc.advance("forfeit", reason)
         return _finalize(names, [], winner, reason, [True, True], fuel,
                          list(fuel), seed, lanes, bound_hashes, lc, meters,

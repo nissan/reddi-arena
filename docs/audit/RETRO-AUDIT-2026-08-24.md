@@ -116,9 +116,15 @@ Reviewer verdict: FINDINGS. **Remediation status (2026-08-24):**
   closing the farm (fake name) and dodge (real auditor, other name) vectors.
   Outcome-neutral: the source-auditor fixture already declares 15, so the
   balance sweep is unchanged (no regen).
-- **Land-last (outcome-changing) batch:** L2 (draft class-ceiling enforcement =
-  E7) and L4 (lane authorization gating the outcome) are the user-approved
-  game-rule changes — decision recorded, BALANCE-REPORT regen required.
+- **Landed** (`fix/draft-enforcement`): L2/E7 — `run_vault_match` now ENFORCES
+  the draft class ceiling (user decision: illegal fielding forfeits). When the
+  caller states the entered class (CLI `--class-a/-b`, web `classA/classB`), a
+  hire that breaches it forfeits before turn 1 (both illegal → void); with no
+  entered class stated (internal balance/parity runs) the hire plays as before,
+  so the sweep is byte-identical and no regen was needed.
+- **Land-last (outcome-changing) batch:** L4 (lane authorization gating the
+  outcome, fail-closed = refusal suppresses effect) is the remaining
+  user-approved game-rule change — decision recorded.
 - **Follow-up:** L6 nit (`HIRE_DEPTH_CAP` sub-hire scope).
 
 | id | sev | finding | disposition |

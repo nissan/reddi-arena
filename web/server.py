@@ -521,7 +521,13 @@ class Handler(BaseHTTPRequestHandler):
             hb = self._load_bot(req["hireB"]) if req.get("hireB") else None
             if (req.get("hireA") and ha is None) or (req.get("hireB") and hb is None):
                 return self._send({"error": "unknown hire"}, 400)
-            trace = run_vault_match(a, b, seed=self._seed(req, 0), hire_a=ha, hire_b=hb)
+            # An entered class in the request enforces the draft ceiling: an
+            # illegal fielding forfeits before turn 1 (audit E7/L2). Absent, the
+            # hire plays (backward-compatible).
+            ca = req.get("classA") if isinstance(req.get("classA"), str) else None
+            cb = req.get("classB") if isinstance(req.get("classB"), str) else None
+            trace = run_vault_match(a, b, seed=self._seed(req, 0), hire_a=ha, hire_b=hb,
+                                    entered_a=ca, entered_b=cb)
             record(trace)
             return self._send(trace)
 
