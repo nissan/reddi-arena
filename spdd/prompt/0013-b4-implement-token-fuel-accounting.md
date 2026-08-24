@@ -11,9 +11,9 @@ Efficiency becomes a skill only if fuel is metered and enforced.
 
 **DoD checklist:**
 
-- [ ] Exceeding the declared fuel cap fails the budget gate
-- [ ] Fuel exhaustion produces a defined outcome, never an exception
-- [ ] Accounting reconciles exactly with the emitted trace
+- [x] Exceeding the declared fuel cap fails the budget gate
+- [x] Fuel exhaustion produces a defined outcome, never an exception
+- [x] Accounting reconciles exactly with the emitted trace
 
 ## E — Entities / Handoff Objects
 
@@ -91,3 +91,4 @@ Fuel accounting is deterministic bookkeeping, not billing.
 | Date | Divergence | Artifact update | Code/test update |
 |---|---|---|---|
 | 2026-08-05 | Generated from plan/backlog.yaml (ready) | initial | n/a |
+| 2026-08-24 | Artifact staleness (DISCOVER): the flat 60-token turn cost, contextWindow-derived cap, and sputter path already shipped with the preview; B2 made sputter a lifecycle forfeit. Node scope: make the bookkeeping first-class without changing outcomes — the 60-token turn is now itemized (prompt 40 + completion 20) through a meter that is the only component charging fuel; O1's "prompt and completion tokens" are deterministic reference values, not provider meters (determinism boundary; B3's effective-fuel channel supplies provider caps). O2's budget gate runs pre-turn at the DECLARED thresholds (completion vs maxOutputTokens, full turn vs cap) and fails as a defined forfeit/void. O3's mid-turn sputter is now reachable and defined: prompt charged, completion never happens, partial turn in the ledger. Balance unchanged (same trigger points; suite's balance-regression section green, no BALANCE-REPORT regen). tools/simulate.py untouched — nothing there reads fuel internals. | this row | `core/fuel.py` (FuelMeter, budget_gate, cost constants); `core/arena.py` charges only via meters, gate branch at binding, trace gains hash-covered `fuelAccounting`; suite 153→164 (T-029 ×5, T-030 ×4, T-031 ×2) |

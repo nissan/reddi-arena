@@ -28,6 +28,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from weigh_in import weigh, classify, CLASSES  # noqa: E402
 from lane import ExecutionLane, find_tool  # noqa: E402
 from lifecycle import MatchLifecycle  # noqa: E402
+from fuel import FuelMeter, budget_gate, TURN_COST  # noqa: E402
 
 ARENA_RAIL = "x402-dry-run"
 ARENA_CURRENCY = "ARENA-CREDIT"
@@ -259,6 +260,11 @@ def run_vault_match(bot_a: dict, bot_b: dict, seed: int = 0,
     fuel = [f for f, _ in fuel_read]
     faults = [strat_read[i][1] or fuel_read[i][1] for i in range(2)]
 
+    # B4: fuel is charged ONLY through the meters; every charge is an
+    # itemized ledger entry, and the trace's fuelAccounting reconciles with
+    # the ledger by construction (T-031).
+    meters = [FuelMeter(fuel[0]), FuelMeter(fuel[1])]
+
     if lanes[0].escaped or lanes[1].escaped:
         if lanes[0].escaped and lanes[1].escaped:
             winner, reason = -1, ("both fielded documents differ from their "
@@ -271,7 +277,7 @@ def run_vault_match(bot_a: dict, bot_b: dict, seed: int = 0,
                       f"match its weighed certificate (binding escape)")
             lc.advance("forfeit", reason)
         return _finalize(names, [], winner, reason, [True, True], fuel,
-                         list(fuel), seed, lanes, bound_hashes, lc)
+                         list(fuel), seed, lanes, bound_hashes, lc, meters)
 
     if faults[0] or faults[1]:
         if faults[0] and faults[1]:
@@ -285,7 +291,26 @@ def run_vault_match(bot_a: dict, bot_b: dict, seed: int = 0,
             reason = f"{names[faulty]} forfeits before turn 1: {faults[faulty]}"
             lc.advance("forfeit", reason)
         return _finalize(names, [], winner, reason, [True, True], fuel,
-                         list(fuel), seed, lanes, bound_hashes, lc)
+                         list(fuel), seed, lanes, bound_hashes, lc, meters)
+
+    # B4 / T-029: the budget-check eval gate runs at the DECLARED thresholds
+    # before any turn — a bot that would exceed its own declaration the
+    # moment it plays fails here as a defined pre-turn outcome.
+    gates = [budget_gate(bot_a, fuel[0]), budget_gate(bot_b, fuel[1])]
+    if not (gates[0]["passed"] and gates[1]["passed"]):
+        if not gates[0]["passed"] and not gates[1]["passed"]:
+            winner = -1
+            reason = (f"both competitors fail the budget gate — {names[0]}: "
+                      f"{gates[0]['reason']}; {names[1]}: {gates[1]['reason']}; "
+                      f"match void")
+            lc.advance("void", reason)
+        else:
+            gated = 0 if not gates[0]["passed"] else 1
+            winner = 1 - gated
+            reason = f"{names[gated]} forfeits before turn 1: {gates[gated]['reason']}"
+            lc.advance("forfeit", reason)
+        return _finalize(names, [], winner, reason, [True, True], fuel,
+                         list(fuel), seed, lanes, bound_hashes, lc, meters)
 
     lc.advance("in-progress", "binding and declarations verified; turn loop opened")
     probe_tool = [find_tool(bot_a, "probe"), find_tool(bot_b, "probe")]
@@ -308,8 +333,10 @@ def run_vault_match(bot_a: dict, bot_b: dict, seed: int = 0,
 
     turns: list[Turn] = []
     secret_held = [True, True]
-    fuel_left = list(fuel)
-    turn_fuel = 60  # flat cost per turn in this reference model
+    # B4: a turn still costs the same flat 60 tokens the reference model
+    # always charged, but the charge is itemized (prompt + completion)
+    # through the meter — see core/fuel.py.
+    turn_fuel = TURN_COST
 
     # Who opens is decided by seed parity, not by slot position. Previously
     # `attacker = n % 2` meant bot B always struck first, and since matches
@@ -321,17 +348,25 @@ def run_vault_match(bot_a: dict, bot_b: dict, seed: int = 0,
         attacker = (opener + n - 1) % 2
         defender = 1 - attacker
 
-        if fuel_left[attacker] < turn_fuel:
-            # Attacker sputters — out of fuel. Defender wins.
-            turns.append(Turn(n, names[attacker], "sputter", 0, 0, 0, "held"))
+        charge = meters[attacker].charge(n)
+        if charge["outcome"] != "ok":
+            # Attacker sputters — fuel exhausted, a defined outcome (T-030).
+            # A mid-turn sputter charged the prompt but the completion never
+            # happened; the ledger records the partial turn.
+            turns.append(Turn(n, names[attacker], "sputter", 0, 0,
+                              charge["prompt"], "held"))
             winner = defender
-            reason = f"{names[attacker]} ran out of fuel (sputter)"
+            reason = (f"{names[attacker]} ran out of fuel "
+                      f"({charge['outcome']}: "
+                      + ("exhausted mid-turn after the prompt charge"
+                         if charge["outcome"] == "sputter-mid"
+                         else "could not afford the turn") + ")")
             lc.advance("forfeit", reason)
-            return _finalize(names, turns, winner, reason, secret_held, fuel, fuel_left, seed, lanes, bound_hashes, lc)
+            return _finalize(names, turns, winner, reason, secret_held, fuel,
+                             _remaining(meters), seed, lanes, bound_hashes, lc, meters)
 
         probe = strat[attacker]["attack"] + nxt(20) - 10
         defense = strat[defender]["defense"] + defense_bonus[defender] + nxt(20) - 10
-        fuel_left[attacker] -= turn_fuel
 
         # Capability use goes through the lane or it does not happen (B1).
         if probe_tool[attacker]:
@@ -343,13 +378,15 @@ def run_vault_match(bot_a: dict, bot_b: dict, seed: int = 0,
             winner = attacker
             reason = f"{names[attacker]} extracted {names[defender]}'s secret on turn {n}"
             lc.advance("decided", reason)
-            return _finalize(names, turns, winner, reason, secret_held, fuel, fuel_left, seed, lanes, bound_hashes, lc)
+            return _finalize(names, turns, winner, reason, secret_held, fuel,
+                             _remaining(meters), seed, lanes, bound_hashes, lc, meters)
 
         if seal_tool[defender]:
             lanes[defender].invoke(seal_tool[defender])
         turns.append(Turn(n, names[attacker], "probe", probe, defense, turn_fuel, "held"))
 
     # Turn limit reached, both secrets held -> tie-break on fuel efficiency.
+    fuel_left = _remaining(meters)
     if fuel_left[0] != fuel_left[1]:
         winner = 0 if fuel_left[0] > fuel_left[1] else 1
         reason = f"turn limit; {names[winner]} won on fuel efficiency"
@@ -358,11 +395,16 @@ def run_vault_match(bot_a: dict, bot_b: dict, seed: int = 0,
         winner = -1
         reason = "turn limit; both secrets held; draw"
         lc.advance("draw", reason)
-    return _finalize(names, turns, winner, reason, secret_held, fuel, fuel_left, seed, lanes, bound_hashes, lc)
+    return _finalize(names, turns, winner, reason, secret_held, fuel, fuel_left,
+                     seed, lanes, bound_hashes, lc, meters)
+
+
+def _remaining(meters) -> list[int]:
+    return [m.remaining for m in meters]
 
 
 def _finalize(names, turns, winner, reason, secret_held, fuel, fuel_left, seed,
-              lanes=None, bound_hashes=None, lifecycle=None) -> dict:
+              lanes=None, bound_hashes=None, lifecycle=None, meters=None) -> dict:
     trace = {
         "format": "vault",
         "seed": seed,
@@ -388,6 +430,11 @@ def _finalize(names, turns, winner, reason, secret_held, fuel, fuel_left, seed,
         # and no non-terminal trace can be produced.
         assert lifecycle.terminal, "match finalized in a non-terminal state"
         trace["lifecycle"] = lifecycle.snapshot()
+    if meters is not None:
+        # B4 / T-031: the itemized fuel ledger ships in the trace,
+        # hash-covered, and reconciles exactly with fuelStart/fuelLeft.
+        trace["fuelAccounting"] = {names[i]: meters[i].snapshot()
+                                   for i in range(2)}
     trace["traceHash"] = _hash({k: v for k, v in trace.items() if k != "traceHash"})
     return trace
 
