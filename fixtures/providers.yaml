@@ -1,0 +1,35 @@
+# Simulated provider availability table for the dry-run arena (issue B3).
+#
+# This is FIXTURE DATA for deterministic tests and the divergence report —
+# it does not describe real accounts, real credentials, or live services,
+# and nothing in the repo probes a provider. `credentials: true` means only
+# "treat this provider as credentialed in the simulation".
+#
+# Capability values are deliberately spread so the declared-requirements
+# channel is exercised: ollama-local offers a smaller context window than
+# the reference bots declare (8000), so selecting it caps effective fuel.
+providers:
+  ollama:
+    credentials: true
+    capabilities:
+      toolCalling: true
+      structuredOutput: true
+      contextWindow: 4000
+      maxOutputTokens: 512
+      modalities: [text]
+  anthropic:
+    credentials: true
+    capabilities:
+      toolCalling: true
+      structuredOutput: true
+      contextWindow: 200000
+      maxOutputTokens: 8192
+      modalities: [text]
+  openai:
+    credentials: false   # simulated: declared but not credentialed -> fail closed
+    capabilities:
+      toolCalling: true
+      structuredOutput: true
+      contextWindow: 128000
+      maxOutputTokens: 4096
+      modalities: [text]

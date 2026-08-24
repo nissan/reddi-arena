@@ -285,6 +285,74 @@ check("T-025 history records the exact walked path append-only",
       == _paths["decided"]
       and _walked_to("decided").history[0]["from"] == "scheduled")
 
+print("provider abstraction (B3: T-026 T-027 T-028)")
+import yaml as _yaml_b3
+from core.providers import (
+    declared_order, select_provider, divergence_report, effective_doc,
+)
+
+_AVAIL = _yaml_b3.safe_load(open(ROOT / "fixtures" / "providers.yaml"))["providers"]
+
+# T-026 — undeclared fallback providers are never selected, even when they
+# are the only thing available; declared-but-uncredentialed fails closed.
+check("T-026 declared order is preferred-then-fallbacks",
+      declared_order(DEF) == ["ollama", "anthropic", "openai"])
+_only_undeclared = {"mystery-llm": {"credentials": True, "capabilities": {
+    "toolCalling": True, "structuredOutput": True, "contextWindow": 999999,
+    "maxOutputTokens": 9999, "modalities": ["text"]}}}
+_sel_u = select_provider(DEF, _only_undeclared)
+check("T-026 an undeclared provider is never selected (fail closed, unavailable)",
+      _sel_u["provider"] is None and _sel_u["status"] == "unavailable"
+      and all(c["provider"] != "mystery-llm" for c in _sel_u["considered"]))
+_no_creds = {n: dict(_AVAIL[n], credentials=False) for n in _AVAIL}
+_sel_nc = select_provider(DEF, _no_creds)
+check("T-026 missing credentials fail closed with the reason stated",
+      _sel_nc["provider"] is None and _sel_nc["status"] == "unavailable"
+      and all("missing credentials" in c["reason"] for c in _sel_nc["considered"]))
+check("T-026 every declared provider considered is recorded as evidence",
+      [c["provider"] for c in _sel_nc["considered"]] == declared_order(DEF))
+
+# T-027 — a provider missing a declared requirement reports degraded, never
+# silent success. The fixture ollama offers contextWindow 4000 < declared 8000.
+_sel = select_provider(DEF, _AVAIL)
+check("T-027 under-capability selection reports degraded with the gap named",
+      _sel["provider"] == "ollama" and _sel["status"] == "degraded"
+      and _sel["missing"] == ["contextWindow"])
+_sel_ok = select_provider(DEF, {"anthropic": _AVAIL["anthropic"]})
+check("T-027 fully-capable selection reports ok with nothing missing",
+      _sel_ok["provider"] == "anthropic" and _sel_ok["status"] == "ok"
+      and _sel_ok["missing"] == [])
+_no_struct = {"anthropic": {"credentials": True, "capabilities": dict(
+    _AVAIL["anthropic"]["capabilities"], structuredOutput=False)}}
+check("T-027 missing structuredOutput is degraded, not silent success",
+      select_provider(DEF, _no_struct)["missing"] == ["structuredOutput"])
+check("T-027 effective doc caps declared numerics at provider capability",
+      effective_doc(DEF, {"contextWindow": 4000})["model"]["requirements"]
+      ["contextWindow"] == 4000
+      and DEF["model"]["requirements"]["contextWindow"] == 8000)
+
+# T-028 — cross-provider divergence is measured and published, not hidden.
+_rep = divergence_report(DEF, RAID, _AVAIL, range(10))
+check("T-028 report compares only credentialed declared providers",
+      _rep["providersCompared"] == ["anthropic", "ollama"])
+check("T-028 trace divergence is published per seed with winners recorded",
+      _rep["traceDivergenceRate"] == 1.0
+      and all("winners" in d for d in _rep["divergentSeeds"].values())
+      and _rep["outcomeDivergenceRate"] == 0.0)
+# A defensive stalemate reaches the turn limit and decides on absolute fuel,
+# so the provider fuel cap flips the winner: observable outcome divergence.
+_wall_a = _cp.deepcopy(DEF)
+_wall_a["extensions"]["x-arena"]["strategy"] = {"attack": 0, "defense": 100}
+_wall_b = _cp.deepcopy(RAID)
+_wall_b["extensions"]["x-arena"]["strategy"] = {"attack": 0, "defense": 100}
+_rep_wall = divergence_report(_wall_a, _wall_b, _AVAIL, range(4))
+check("T-028 outcome divergence is detected and listed when it occurs",
+      _rep_wall["outcomeDivergenceRate"] > 0
+      and all(not _rep_wall["divergentSeeds"][s]["identical_outcome"]
+              for s in _rep_wall["outcomeDivergentSeeds"]))
+check("T-028 divergence report is deterministic",
+      divergence_report(DEF, RAID, _AVAIL, range(10)) == _rep)
+
 print("anti-gaming review (A6: T-013 T-014)")
 import copy as _cp
 from weigh_in import weigh as _weigh

@@ -11,9 +11,9 @@ Provider neutrality is an ADL promise; the Arena is where it either holds or vis
 
 **DoD checklist:**
 
-- [ ] Undeclared fallbacks are never used
-- [ ] A provider missing structuredOutput reports degraded, not silent success
-- [ ] Cross-provider divergence is measured and published, not hidden
+- [x] Undeclared fallbacks are never used
+- [x] A provider missing structuredOutput reports degraded, not silent success
+- [x] Cross-provider divergence is measured and published, not hidden
 
 ## E — Entities / Handoff Objects
 
@@ -91,3 +91,4 @@ Declaring a provider is not credential authorization. Missing credentials fail c
 | Date | Divergence | Artifact update | Code/test update |
 |---|---|---|---|
 | 2026-08-05 | Generated from plan/backlog.yaml (ready) | initial | n/a |
+| 2026-08-24 | Determinism + credential boundaries constrain the design: no provider SDK, network call, or credential handling anywhere, so "provider" is a caller-supplied data table (`fixtures/providers.yaml`, simulated) and selection is a pure contract check. T-028's nightly cross-provider e2e belongs to the approval-gated live lane; here divergence is measured through the one deterministic provider-sensitive channel — declared numeric requirements capped by provider capability (effective fuel) — and published via tools/provider_divergence.py → docs/PROVIDER-DIVERGENCE-REPORT.md (BALANCE-REPORT pattern). Surfaces expanded beyond core/+tests/ to fixtures/, tools/, docs/ for the fixture table and published report; no parallel node shares them. | this row | `core/providers.py` (declared_order, select_provider fail-closed with selection evidence, effective_doc, divergence_report publishing trace- and outcome-level rates); suite 141→153 (T-026 ×4, T-027 ×4, T-028 ×4) |
