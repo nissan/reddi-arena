@@ -18,12 +18,14 @@ Three properties, all deterministic:
     The engine has NO default field list. A document with no declared
     rules gets its payload withheld entirely — fail closed, not stored
     unredacted.
-  * No secret survives (T-034): redaction is two-level. Declared fields
-    are masked wherever they appear (any nesting, dicts or lists), and
-    every VALUE that appeared under a declared field — including scalar
-    leaves nested inside a declared object or list — is then scrubbed
-    from every string in the stream, so a secret echoed under some other
-    key is caught too. A canary planted anywhere a declared field reaches
+  * No secret survives (T-034): redaction is two-level. The declared MODE
+    (audit T10) selects how each declared field is represented — mask (a
+    marker), hash (a digest), drop (removed), or withhold (whole payload);
+    an unrecognized mode fails closed to withheld. Then, for every
+    non-withhold mode, every VALUE that appeared under a declared field —
+    including scalar leaves nested inside a declared object or list — is
+    scrubbed from every string in the stream, so a secret echoed under some
+    other key is caught too regardless of mode. A canary planted anywhere a declared field reaches
     cannot appear in the stored stream as text. Out of scope (same
     transformed-leak class as the scoring canary): a numeric secret
     echoed as a raw JSON number under a non-declared key (the scrub
@@ -174,7 +176,13 @@ def redact_payload(payload: dict, rules: dict | None):
         return {"withheld": WITHHELD_UNKNOWN_MODE.format(mode=mode)}
     if mode == "withhold":
         return {"withheld": WITHHELD_DECLARED}
-    fields = set(rules["fields"])
+    declared_fields = rules.get("fields")
+    if not declared_fields:
+        # A recognized mode with no declared fields cannot redact anything —
+        # withhold rather than return the payload unredacted (fail closed, and
+        # never KeyError on a hand-built rules dict; audit review).
+        return {"withheld": WITHHELD}
+    fields = set(declared_fields)
     secrets: list = []
     _collect_secret_values(payload, fields, secrets)
     # Scrub longest-first (ties broken deterministically): replacing a short

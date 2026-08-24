@@ -1108,6 +1108,10 @@ check("T10 an unknown mode fails closed (withheld), never silent mask",
 check("T10 every mode keeps the secret out of the stored result",
       all("HUNTER2-XYZ" not in _t10json.dumps(_t10(m))
           for m in ("mask", "payload-redacted", "hash", "drop", "withhold", "bogus")))
+check("T10 a recognized mode with no declared fields fails closed, never KeyError",
+      "withheld" in redact_payload(_t10_pay, {"mode": "hash"})
+      and "withheld" in redact_payload(_t10_pay, {"mode": "mask", "fields": []})
+      and "HUNTER2-XYZ" not in _t10json.dumps(redact_payload(_t10_pay, {"mode": "drop"})))
 
 print("vault attack/defend scoring (B6: T-035 T-036 T-037)")
 from core.scoring import (score_match, detect_leak, UndefinedOutcome, POINTS,
