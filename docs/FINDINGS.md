@@ -34,6 +34,7 @@ below has exactly one disposition; T-093 asserts this register stays complete.
 | F-009 | folded into F-007 filing | [reddiagent-lab#440](https://github.com/nissan/reddiagent-lab/issues/440) |
 | F-010 | filed | [reddiagent-lab#443](https://github.com/nissan/reddiagent-lab/issues/443) |
 | F-011 | filed | [reddiagent-lab#444](https://github.com/nissan/reddiagent-lab/issues/444) |
+| F-012 | filed | [reddiagent-lab#450](https://github.com/nissan/reddiagent-lab/issues/450) |
 
 Disposition vocabulary: `filed` (own intake issue), `evidence-attached`
 (reproduction added to an existing lab item), `duplicate` (already tracked
@@ -449,3 +450,20 @@ either query chain state or invent an extension.
 This is the strongest available argument for the F-007 price field: the need is
 not hypothetical and not Arena-specific — the chain layer already committed to
 it, and the declaration layer disagrees. Recommend attaching to the F-007 intake.
+
+### F-012 — Conformance evidence lives in two places; checker verdicts are not reproducible downstream
+
+**Filed upstream 2026-08-24:** [reddiagent-lab#450](https://github.com/nissan/reddiagent-lab/issues/450).
+
+Discovered during node A7 (conformance→tier mapping), caught by the
+independent review of PR #61 before merge. Two coupled gaps: (1) the schema
+carries both `conformance.evidenceRefs` and per-event `evidenceRef`, and the
+lab-certified-L3 reference mercenary declares only the latter — so a
+downstream implementer keying "L3 evidence" on `conformance.evidenceRefs`
+mis-assesses a canonical document; (2) the conformance checker bundle is not
+vendorable and the level rules are not specified in prose, so downstream
+repos cannot reproduce canonical verdicts at all. Arena mitigation: the
+assessment is explicitly named `arenaAssessedLevel` (never `achievedLevel`),
+L3 evidence accepts either declaration site, and tier eligibility anchors to
+`min(requestedLevel, arenaAssessedLevel)` — which reproduces both recorded
+lab verdicts (defender 1, mercenary 3) without claiming canonical authority.

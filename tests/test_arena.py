@@ -54,6 +54,65 @@ check("refusal shows the AU delta", d_ant.au_delta == 65 and d_ant.fielded_au ==
 d_beetle = evaluate_hire(DEF, MERC, "Beetleweight")
 check("same hire allowed at Beetleweight", d_beetle.allowed)
 
+print("conformance levels to league tiers (A7: T-015 T-016)")
+import copy as _cp_a7
+from weigh_in import weigh as _w_a7, tier_verdict, assess_level, TIER_LEVELS
+from core.arena import LEAGUE_TIERS
+
+check("A7 tier levels stay in sync with core.arena.LEAGUE_TIERS",
+      TIER_LEVELS == {t: cfg["level"] for t, cfg in LEAGUE_TIERS.items()}
+      and all(LEAGUE_TIERS[t]["purse"] == (t == "title") for t in LEAGUE_TIERS))
+
+# Eligibility anchors to min(requested, arenaAssessed), which must reproduce
+# the lab checker's recorded verdicts (README): defender 1, mercenary 3.
+_v_def = _w_a7(DEF)["tierVerdict"]
+_v_merc = _w_a7(MERC)["tierVerdict"]
+check("A7 verdicts reproduce the lab checker's recorded levels (DEF 1, MERC 3)",
+      _v_def["effectiveLevel"] == 1 and _v_merc["effectiveLevel"] == 3
+      and _v_def["status"] == "ok" and _v_merc["status"] == "ok")
+
+# T-015 — a Level-1 document cannot enter a Title fight or carry a purse.
+check("T-015 the L1-declaring reference doc is Rookie-only, no purse, no hiring",
+      _v_def["eligibleTiers"] == ["rookie"]
+      and _v_def["purse"] is False and _v_def["hiring"] is False)
+check("T-015 the lab-certified L3 mercenary is Title-eligible with purse and hiring",
+      _v_merc["highestTier"] == "title"
+      and _v_merc["purse"] is True and _v_merc["hiring"] is True)
+# Hash coverage, non-vacuously: removing observability retention changes the
+# verdict but not one AU line, so the hashes may differ ONLY via tierVerdict.
+_no_ret = _cp_a7.deepcopy(DEF)
+del _no_ret["harness"]["observability"]["retention"]
+check("T-015 the tier verdict is in the certificate and covered by the hash",
+      _w_a7(DEF)["tierVerdict"] == _v_def
+      and _w_a7(_no_ret)["breakdown"] == _w_a7(DEF)["breakdown"]
+      and _w_a7(_no_ret)["tierVerdict"] != _v_def
+      and _w_a7(_no_ret)["capabilityHash"] != _w_a7(DEF)["capabilityHash"])
+
+# T-016 — requestedLevel above the assessed level is rejected with the
+# failing rung named; eligibility falls back to the assessed level rather
+# than locking the bot out of tiers it genuinely reaches.
+_over = _cp_a7.deepcopy(DEF)
+del _over["harness"]["observability"]["retention"]
+_over["conformance"]["requestedLevel"] = 3
+_v_over = tier_verdict(_over)
+check("T-016 over-request rejected with the failing rung named",
+      _v_over["status"] == "over-request-rejected"
+      and "retention" in _v_over["reason"]
+      and _v_over["overRequested"] is True)
+check("T-016 rejection falls back to the assessed level, no total lockout",
+      _v_over["effectiveLevel"] == 2
+      and _v_over["eligibleTiers"] == ["rookie", "open"]
+      and _v_over["purse"] is False)
+check("T-016 an honest request passes; requests beyond the ladder assess at its max",
+      tier_verdict(DEF)["status"] == "ok"
+      and assess_level(DEF)["arenaAssessedLevel"] == 3
+      and tier_verdict({**_cp_a7.deepcopy(MERC),
+                        "conformance": {"requestedLevel": 4}})["effectiveLevel"] == 3)
+check("T-016 an unreadable requestedLevel fails closed without an exception",
+      tier_verdict({**_cp_a7.deepcopy(DEF),
+                    "conformance": {"requestedLevel": "3"}})["status"]
+      == "rejected-unreadable")
+
 print("coupled weight for hires (A5: T-010 T-011 T-012)")
 from core.arena import evaluate_hire_chain, HIRE_DEPTH_CAP
 
