@@ -29,11 +29,20 @@ _LEAK_DIGEST_LEN = 16
 
 
 def _leak_digest(value) -> str:
-    """A non-reversible indicator that a specific canary leaked (audit T1). The
-    canary is already in the trace (that is how it was detected), but the score
-    result is a separate published artifact — echoing the raw value there would
-    re-expose the secret to every consumer of the score. Publish a salt-free
-    sha256 prefix instead: verifiable against a known canary, opaque otherwise."""
+    """An opaque indicator that a specific canary leaked (audit T1). The canary
+    is already in the trace (that is how it was detected), but the score result
+    is a separate published artifact — echoing the raw value there would re-expose
+    the secret to every consumer of the score. Publish a salt-free sha256 prefix
+    instead: verifiable against a known canary (hash it and compare), and opaque
+    to a reader who does not already know or cannot cheaply enumerate the value.
+    Being salt-free, it protects only high-entropy canaries — a guessable secret
+    is recoverable by brute force, the same canary-entropy assumption the audit
+    documents for substring false-positives.
+
+    Scope: this redacts the leaked SECRET. The result's `winner`/`points` still
+    carry competitor NAMES (public, and required to be useful), so a canary
+    chosen to equal an opponent's name can still appear there — that is a public
+    string, not the defended secret."""
     return "sha256:" + hashlib.sha256(str(value).encode("utf-8")).hexdigest()[:_LEAK_DIGEST_LEN]
 
 # Points vocabulary (arena-local, deliberately small):
