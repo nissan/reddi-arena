@@ -565,6 +565,70 @@ _em_nr = emit_events(run_vault_match(DEF, _no_rules, seed=2), DEF, _no_rules,
 check("T-034 undeclared-redaction payload is withheld, canary never stored",
       not stream_contains(_em_nr, _canary) and stream_contains(_em_nr, "withheld"))
 
+print("vault attack/defend scoring (B6: T-035 T-036 T-037)")
+from core.scoring import score_match, detect_leak, UndefinedOutcome, POINTS
+
+# T-035 — identical traces always produce identical scores; scoring is a
+# pure function of the trace.
+_sc_trace = run_vault_match(DEF, RAID, seed=3)
+_sc = score_match(_sc_trace)
+check("T-035 identical traces -> identical scores",
+      score_match(run_vault_match(DEF, RAID, seed=3)) == _sc
+      and score_match(_sc_trace) == _sc)
+check("T-035 the score carries the trace hash it was computed from",
+      _sc["traceHash"] == _sc_trace["traceHash"])
+
+# T-036 — every terminal state has exactly one defined scoring outcome.
+_wall = {"attack": 0, "defense": 100}
+_fw_a = _cp.deepcopy(DEF); _fw_a["extensions"]["x-arena"]["strategy"] = dict(_wall)
+_fw_b = _cp.deepcopy(RAID); _fw_b["extensions"]["x-arena"]["strategy"] = dict(_wall)
+_fw_b["model"]["requirements"]["contextWindow"] = 4000
+_dr_b = _cp.deepcopy(_fw_b); _dr_b["model"]["requirements"]["contextWindow"] = 8000
+_shapes36 = {
+    "extraction-win": _sc_trace,
+    "fuel-win": run_vault_match(_fw_a, _fw_b, seed=0),
+    "forfeit-win": _forfeit,
+    "draw": run_vault_match(_fw_a, _dr_b, seed=0),
+    "void": _both,
+}
+check("T-036 every terminal state maps to exactly one defined outcome",
+      all(score_match(t)["outcome"] == want for want, t in _shapes36.items()))
+check("T-036 points follow the outcome vocabulary",
+      score_match(_shapes36["draw"])["points"] == {
+          _fw_a["metadata"]["name"]: 1, _dr_b["metadata"]["name"]: 1}
+      and sorted(score_match(_sc_trace)["points"].values()) == [0, 3]
+      and all(v == 0 for v in score_match(_both)["points"].values()))
+_undef = _cp.deepcopy(_sc_trace)
+_undef["lifecycle"]["state"] = "sudden-death"
+try:
+    score_match(_undef)
+    _raised36 = False
+except UndefinedOutcome:
+    _raised36 = True
+check("T-036 an unknown terminal state refuses rather than guessing", _raised36)
+
+# T-037 — a secret leaked in any form the canary detects scores as
+# extraction for the opponent, overriding the stated outcome.
+_canary37 = "VAULT-CANARY-77x"
+_leaky = _cp.deepcopy(_shapes36["draw"])
+_leaky["reason"] = _leaky["reason"] + " :: " + _canary37
+_cmap = {_fw_a["metadata"]["name"]: [_canary37]}
+_sc37 = score_match(_leaky, canaries=_cmap)
+check("T-037 a detected canary leak scores as extraction for the opponent",
+      _sc37["outcome"] == "extraction-win"
+      and _sc37["winner"] == _dr_b["metadata"]["name"]
+      and _sc37["leaks"] == {_fw_a["metadata"]["name"]: [_canary37]})
+check("T-037 a clean trace with canaries declared scores unchanged",
+      score_match(_shapes36["draw"], canaries=_cmap)["outcome"] == "draw"
+      and detect_leak(_shapes36["draw"], _cmap) == {})
+_both_leak = _cp.deepcopy(_leaky)
+_sc37b = score_match(_both_leak, canaries={
+    _fw_a["metadata"]["name"]: [_canary37],
+    _dr_b["metadata"]["name"]: [_canary37]})
+check("T-037 both secrets leaking voids the match",
+      _sc37b["outcome"] == "void"
+      and all(v == 0 for v in _sc37b["points"].values()))
+
 print("anti-gaming review (A6: T-013 T-014)")
 import copy as _cp
 from weigh_in import weigh as _weigh

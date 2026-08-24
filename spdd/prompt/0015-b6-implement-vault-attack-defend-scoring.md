@@ -11,9 +11,9 @@ A format nobody can argue about is worth more than five ambiguous ones.
 
 **DoD checklist:**
 
-- [ ] Identical traces always produce identical scores
-- [ ] Every terminal state has exactly one defined scoring outcome
-- [ ] A secret leaked in any form the canary detects scores as extraction
+- [x] Identical traces always produce identical scores
+- [x] Every terminal state has exactly one defined scoring outcome
+- [x] A secret leaked in any form the canary detects scores as extraction
 
 ## E — Entities / Handoff Objects
 
@@ -91,3 +91,4 @@ Scoring is deterministic given a trace; it does not judge intent.
 | Date | Divergence | Artifact update | Code/test update |
 |---|---|---|---|
 | 2026-08-05 | Generated from plan/backlog.yaml (ready) | initial | n/a |
+| 2026-08-24 | Artifact staleness (DISCOVER): the engine already decides winner/reason; the node's scope is the SCORING projection — core/scoring.py, a pure function of the trace. Outcome vocabulary {extraction-win 3/0, fuel-win 2/0, forfeit-win 2/0, draw 1/1, void 0/0} maps exhaustively from B2's lifecycle terminal states; an unknown state raises UndefinedOutcome rather than guessing. Canary detection is textual over the serialized trace (verbatim presence) — a competitor's canary appearing anywhere scores extraction-win for the opponent overriding the stated outcome, both leaking voids; transformed leaks (encoding, truncation) are documented out of scope for the dry-run arena, consistent with B5's redaction note. | this row | `core/scoring.py` (score_match, detect_leak, POINTS, UndefinedOutcome); suite 186→194 (T-035 ×2, T-036 ×3, T-037 ×3) |
