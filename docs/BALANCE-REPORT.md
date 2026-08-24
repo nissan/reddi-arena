@@ -42,6 +42,17 @@ strength. Our round-robin side-A rate is 38.9% — and it is not a
 balance signal. Mirror matches put identical strategies on both sides, so any
 deviation from 50% is pure slot advantage. That is the number in the band check.
 
+## Attack/defence asymmetry (B7 / T-038)
+
+Cohorting archetypes by declared lean — attack-leaning (aggressor,
+glass-cannon) versus defense-leaning (grinder, turtle), neutral excluded —
+the attack cohort holds **59.9%** of the two cohort mean win rates
+(attack mean 49.1%, defence mean 32.9%). Published band: **35%–65%**.
+
+The format is allowed to lean toward attack — extraction is how you score —
+but a split beyond the band would mean defense-leaning builds are not
+viable, and the harness fails the run.
+
 ## Power-up impact
 
 | Measure | Value |

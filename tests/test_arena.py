@@ -951,6 +951,37 @@ check("power-up still gives positive lift", _pw["lift"] > 0)
 check("every archetype wins at least some matches",
       all(v > 0 for v in _rr["winRate"].values()))
 
+# T-038 — the attack/defence win split stays inside the published band.
+from tools.simulate import attack_defence_split
+_split = attack_defence_split(_rr)
+_s_lo, _s_hi = BANDS["attack_defence_split"]
+check(f"T-038 attack/defence split within published band ({_split['split']:.1%})",
+      _s_lo <= _split["split"] <= _s_hi
+      and _split["attackCohort"] and _split["defenceCohort"])
+
+# T-039 — dominance threshold enforced AND the balance report is published
+# (docs/BALANCE-REPORT.md carries the current verdict and the bands).
+check("T-039 no archetype exceeds the published dominance threshold",
+      max(_rr["winRate"].values()) <= BANDS["archetype_dominance_max"])
+_report_md = (ROOT / "docs" / "BALANCE-REPORT.md").read_text()
+check("T-039 the balance report is published with verdict and bands",
+      "BALANCED" in _report_md and "70%" in _report_md
+      and "attack/defence" in _report_md.lower())
+
+# P1 exit-gate evidence (phase gate, measured here because the balance
+# harness is the e2e surface): 100 consecutive local matches, every trace
+# terminal and hash-complete, zero policy escapes.
+_gate_ok = True
+for _s in range(100):
+    _t = run_vault_match(DEF, RAID, seed=_s)
+    _gate_ok = (_gate_ok
+                and _t["lifecycle"]["terminal"]
+                and _t["traceHash"].startswith("sha256:")
+                and all(e["allowed"] for evs in _t["laneEvents"].values()
+                        for e in evs))
+check("P1 exit gate: 100 consecutive matches, complete traces, zero policy escapes",
+      _gate_ok)
+
 print("landing page and waitlist")
 _land = (ROOT / "web" / "static" / "landing.html").read_text()
 check("landing page exists with a signup form", 'id="joinForm"' in _land)
