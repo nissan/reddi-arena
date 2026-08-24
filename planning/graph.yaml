@@ -1639,8 +1639,13 @@ nodes:
     redundancy.'
   parent: null
   acceptance:
-  - Each epic is a GitHub issue with its nodes attached as sub-issues.
-  - Dependency relations visible on GitHub match graph.yaml dependsOn.
+  - 'Each epic is a GitHub issue with its nodes linked as sub-issues — via the
+    native REST sub-issue API where usable, else via the epic body task-list of
+    node references (GitHub renders both as tracked sub-issue links), per the
+    "where the API supports them" scope. planning/ge02-issue-link-audit.md
+    records which mechanism was used.'
+  - 'Dependency relations visible on GitHub match graph.yaml dependsOn — as
+    native links where the API supports them, else as readable text redundancy.'
   - No volatile GitHub state is written back into planning/graph.yaml.
   tests:
   - id: GE02-T1
@@ -1658,7 +1663,7 @@ nodes:
       "where the API supports them", documented in planning/ge02-issue-link-audit.md.'
     - 'tools/sync_github_relations.py is the deterministic planner (writes nothing
       to graph.yaml); GE02-T1 graph_lint clean, arena suite green, planner guarded
-      by 5 GE02 checks in tests/test_arena.py. PR review pending.'
+      by 5 GE02 checks in tests/test_arena.py. Independent review APPROVE on PR #93.'
   boundary: Metadata sync only; creates no workflow automation.
   surfaces:
     allow:
