@@ -485,7 +485,7 @@ nodes:
 - id: B4
   type: implementation
   title: Implement token fuel accounting
-  status: ready
+  status: done
   objective: Efficiency becomes a skill only if fuel is metered and enforced.
   epic: E05
   lane: SL-B
@@ -512,6 +512,15 @@ nodes:
     - test-output
     - pr-review
     - spdd artifact (spdd/prompt/*-b4-*.md) Sync Log updated
+    recorded:
+    - 'PR #56 (merged 2026-08-24, closes #12): T-029/T-030/T-031 implemented —
+      core/fuel.py FuelMeter (only fuel-charging component, itemized
+      prompt/completion ledger, never overdraws), budget_gate at the declared
+      thresholds failing as defined pre-turn forfeit/void, sputter-pre/mid
+      defined lifecycle forfeits, trace gains hash-covered fuelAccounting
+      reconciling exactly with fuelStart/fuelLeft; outcomes unchanged (same
+      60-token turn, balance regression green); suite 153->164; Sync Log
+      records the staleness re-scope.'
   boundary: Fuel accounting is deterministic bookkeeping, not billing.
   surfaces:
     allow: *id002
@@ -558,7 +567,7 @@ nodes:
 - id: B6
   type: implementation
   title: Implement Vault attack/defend scoring
-  status: blocked
+  status: ready
   objective: A format nobody can argue about is worth more than five ambiguous ones.
   epic: E06
   lane: SL-B
@@ -1170,7 +1179,7 @@ nodes:
 - id: E2I
   type: implementation
   title: Detect undeclared-capability reliance
-  status: blocked
+  status: ready
   objective: The subtler cheat is not declaring a tool but relying on capacity beyond the
     declared envelope.
   epic: E13
