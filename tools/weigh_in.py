@@ -147,11 +147,17 @@ def _l2(doc: dict) -> bool:
 
 
 def _l3(doc: dict) -> bool:
+    # Evidence may live in conformance.evidenceRefs OR on the observability
+    # events themselves — the lab-certified L3 reference mercenary declares
+    # only the latter (finding F-012, reddiagent-lab#450).
     obs = (doc.get("harness") or {}).get("observability") or {}
     conf = doc.get("conformance") or {}
+    events = obs.get("events") or []
+    evidenced = bool(conf.get("evidenceRefs")
+                     or (events and all(e.get("evidenceRef") for e in events)))
     return bool((obs.get("redaction") or {}).get("fields")
                 and obs.get("retention")
-                and conf.get("evidenceRefs"))
+                and evidenced)
 
 
 LEVEL_LADDER = [
@@ -161,55 +167,75 @@ LEVEL_LADDER = [
 ]
 
 
+LADDER_MAX = LEVEL_LADDER[-1][0]
+
+
 def assess_level(doc: dict) -> dict:
-    """Arena-local structural assessment. Achieved level = highest rung with
-    every rung at or below it passing; the first failing rung is named."""
-    achieved = 0
+    """Arena-local structural assessment (arenaAssessedLevel = highest rung
+    with every rung at or below it passing; the first failing rung is named).
+    Deliberately NOT canonical conformance — see F-012 / reddiagent-lab#450."""
+    assessed = 0
     failing = None
     for level, requirement, checkfn in LEVEL_LADDER:
         if checkfn(doc):
-            achieved = level
+            assessed = level
         else:
             failing = {"level": level, "requirement": requirement}
             break
-    return {"achievedLevel": achieved, "failingRequirement": failing}
+    return {"arenaAssessedLevel": assessed, "failingRung": failing}
 
 
 def tier_verdict(doc: dict) -> dict:
     """The verdict recorded in the weigh-in certificate (T-015/T-016).
 
-    A requestedLevel above the achieved level is rejected with the failing
-    requirement named — a bot cannot claim its way into a tier. Otherwise
-    eligibility covers every tier whose required level is met; purse and
-    hiring rights exist only where the tier mapping grants them (Title).
+    Eligibility anchors to min(requestedLevel, arenaAssessedLevel) — which
+    reproduces the lab checker's recorded verdicts for both reference docs
+    (defender 1, mercenary 3). A requestedLevel above the assessed level is
+    rejected with the failing rung named, and eligibility falls back to the
+    assessed level — the over-claim is refused, the bot is not locked out of
+    tiers it genuinely reaches. A requestedLevel beyond the ladder is
+    assessed at the ladder maximum, not treated as a defect. An unreadable
+    requestedLevel fails closed. Purse and hiring exist only at Title.
     """
     assessment = assess_level(doc)
-    achieved = assessment["achievedLevel"]
+    assessed = assessment["arenaAssessedLevel"]
     requested = (doc.get("conformance") or {}).get("requestedLevel")
-    if requested is not None and requested > achieved:
-        failing = assessment["failingRequirement"] or {
-            "level": requested,
-            "requirement": f"level {requested} exceeds the assessment ladder"}
+    if requested is not None and (not isinstance(requested, int)
+                                  or isinstance(requested, bool)):
         return {
-            "status": "rejected",
-            "reason": (f"requestedLevel {requested} exceeds achieved level "
-                       f"{achieved}: L{failing['level']} requires "
-                       f"{failing['requirement']}"),
-            "achievedLevel": achieved,
-            "requestedLevel": requested,
-            "eligibleTiers": [],
-            "highestTier": None,
-            "purse": False,
-            "hiring": False,
+            "status": "rejected-unreadable",
+            "reason": f"unreadable requestedLevel {requested!r} (non-integer)",
+            "arenaAssessedLevel": assessed, "requestedLevel": None,
+            "effectiveLevel": 0, "overRequested": False,
+            "eligibleTiers": [], "highestTier": None,
+            "purse": False, "hiring": False,
         }
-    eligible = sorted((t for t, lvl in TIER_LEVELS.items() if achieved >= lvl),
+    capped_request = min(requested, LADDER_MAX) if requested is not None else assessed
+    over = capped_request > assessed
+    effective = min(capped_request, assessed)
+    if over:
+        failing = assessment["failingRung"]
+        status = "over-request-rejected"
+        reason = (f"requestedLevel {requested} rejected: arena assessment is "
+                  f"L{assessed} — L{failing['level']} requires "
+                  f"{failing['requirement']}; eligibility falls back to "
+                  f"L{effective}")
+    else:
+        status = "ok"
+        reason = f"assessed L{assessed}, requested {requested}; effective L{effective}"
+        if requested is not None and requested > LADDER_MAX:
+            reason += (f" (requestedLevel {requested} is beyond the arena "
+                       f"ladder maximum L{LADDER_MAX}; assessed at the maximum)")
+    eligible = sorted((t for t, lvl in TIER_LEVELS.items() if effective >= lvl),
                       key=lambda t: TIER_LEVELS[t])
     highest = eligible[-1] if eligible else None
     return {
-        "status": "ok",
-        "reason": f"achieved L{achieved}; eligible: {', '.join(eligible) or 'none'}",
-        "achievedLevel": achieved,
+        "status": status,
+        "reason": reason,
+        "arenaAssessedLevel": assessed,
         "requestedLevel": requested,
+        "effectiveLevel": effective,
+        "overRequested": over,
         "eligibleTiers": eligible,
         "highestTier": highest,
         "purse": highest == "title",
