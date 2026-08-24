@@ -296,6 +296,152 @@ check("T-024 both competitors faulty voids the match",
 check("T-024 fault forfeits are deterministic",
       run_vault_match(_crash, RAID, seed=2)["traceHash"] == _t24["traceHash"])
 
+# Fault-hardening (retro-audit E1/E2/E3/E9/E10): malformed declarations
+# resolve to a defined terminal trace, never an unhandled exception.
+def _mut(base, fn):
+    d = _cp.deepcopy(base)
+    fn(d)
+    return d
+_malformed = {
+    "extensions non-dict (E2)": lambda d: d.__setitem__("extensions", "yes"),
+    "model non-dict (E2)": lambda d: d.__setitem__("model", "big"),
+    "harness non-dict (E2)": lambda d: d.__setitem__("harness", "h"),
+    "metadata non-dict (E2)": lambda d: d.__setitem__("metadata", "m"),
+    "requirements non-dict (E2)": lambda d: d["model"].__setitem__("requirements", "r"),
+    "tools list-of-strings (E2)": lambda d: d["harness"].__setitem__("tools", ["x"]),
+    "policies list-of-strings (E2)": lambda d: d["harness"].__setitem__("policies", ["p"]),
+    "strategy non-dict (E2)": lambda d: d["extensions"]["x-arena"].__setitem__("strategy", "aggro"),
+    "maxOutputTokens string (E1)": lambda d: d["model"]["requirements"].__setitem__("maxOutputTokens", "512"),
+    "missing metadata.name (E9)": lambda d: d["metadata"].pop("name"),
+}
+_fault_ok = True
+for _label, _fn in _malformed.items():
+    for _combo in ("A", "both"):
+        _da = _mut(DEF, _fn)
+        _db = _mut(RAID, _fn) if _combo == "both" else _cp.deepcopy(RAID)
+        try:
+            _tf = run_vault_match(_da, _db, seed=2)
+            _fault_ok = (_fault_ok and _tf["lifecycle"]["terminal"]
+                         and _tf["traceHash"].startswith("sha256:"))
+        except Exception:
+            _fault_ok = False
+check("fault-hardening: curated malformed declarations resolve to a terminal trace",
+      _fault_ok)
+
+# Typed-fuzz sweep: set a hostile value type at every nested declaration path
+# and require a terminal trace (never an exception). Covers the value classes
+# the reviewer flagged — non-dict, non-list, unhashable, non-finite, non-str
+# name — not just the curated shapes above.
+_BAD_VALUES = [None, 3.5, "x", [1, 2], {"k": 1}, True, float("inf"),
+               float("nan"), [[1]], "999999",
+               int("9" * 400), b"bytes", {1, 2}]  # huge int / non-serializable
+_PATHS = [
+    ("metadata",), ("metadata", "name"), ("model",), ("model", "requirements"),
+    ("model", "requirements", "contextWindow"),
+    ("model", "requirements", "maxOutputTokens"),
+    ("model", "requirements", "modalities"), ("harness",), ("harness", "tools"),
+    ("harness", "policies"), ("harness", "runtime"),
+    ("harness", "runtime", "network"), ("harness", "observability"),
+    ("harness", "memory"), ("extensions",), ("extensions", "x-arena"),
+    ("extensions", "x-arena", "strategy"),
+    ("extensions", "x-arena", "strategy", "attack"), ("conformance",),
+]
+
+def _set_path(doc, path, value):
+    cur = doc
+    for k in path[:-1]:
+        nxt = cur.get(k) if isinstance(cur, dict) else None
+        if not isinstance(nxt, dict):
+            nxt = {}
+            if isinstance(cur, dict):
+                cur[k] = nxt
+        cur = nxt
+    if isinstance(cur, dict):
+        cur[path[-1]] = value
+
+from weigh_in import weigh as _w_fuzz
+_fuzz_crashes = []
+_fuzz_n = 0
+for _path in _PATHS:
+    for _val in _BAD_VALUES:
+        _d = _cp.deepcopy(DEF)
+        _set_path(_d, _path, _val)
+        _fuzz_n += 1
+        # Exercise both the match engine AND weigh() directly (the hash path
+        # the certificate flows through), single-side and self-match.
+        for _call in (lambda: run_vault_match(_d, RAID, seed=2),
+                      lambda: run_vault_match(_cp.deepcopy(_d), _cp.deepcopy(_d), seed=1),
+                      lambda: _w_fuzz(_d)):
+            try:
+                _r = _call()
+                if isinstance(_r, dict) and "lifecycle" in _r \
+                        and not _r["lifecycle"]["terminal"]:
+                    _fuzz_crashes.append((_path, type(_val).__name__, "non-terminal"))
+            except Exception as _e:
+                _fuzz_crashes.append((_path, type(_val).__name__, type(_e).__name__))
+# Item-field injection: a bad value INSIDE a tool/policy/source/intent item
+# (the value class the reviewer flagged — an unhashable tool id, etc.).
+# ids whose STRING FORM contains a tool-search fragment ("probe"/"seal"):
+# find_tool selects by str-match, so such an id must not be returned
+# unhashable and then hashed by invoke() (audit round-3 C).
+_ID_VALUES = _BAD_VALUES + [["probe-core"], {"probe": 1}, {"seal"},
+                            ["seal-x"], {"sealer": 1}]
+for _coll, _field in [("tools", "id"), ("tools", "sideEffects"),
+                      ("policies", "resource"), ("policies", "id"),
+                      ("dataSources", "type"), ("functions", "id")]:
+    _vals = _ID_VALUES if (_coll, _field) == ("tools", "id") else _BAD_VALUES
+    for _val in _vals:
+        _d = _cp.deepcopy(DEF)
+        _d.setdefault("harness", {})[_coll] = [{_field: _val}]
+        _fuzz_n += 1
+        for _call in (lambda: run_vault_match(_d, RAID, seed=2),
+                      lambda: run_vault_match(RAID, _d, seed=0),
+                      lambda: _w_fuzz(_d)):
+            try:
+                _call()
+            except Exception as _e:
+                _fuzz_crashes.append((f"{_coll}[].{_field}", type(_val).__name__,
+                                      type(_e).__name__))
+check(f"fault-hardening: typed-fuzz sweep — nested + item-field bad values resolve, "
+      f"never crash ({_fuzz_n} shapes over match+weigh+self-match)",
+      not _fuzz_crashes)
+# A malformed hire document must not crash the match either (audit minor 4).
+check("fault-hardening: a malformed hire document does not crash the match",
+      all(run_vault_match(DEF, RAID, seed=2, hire_a=_hv)["lifecycle"]["terminal"]
+          for _hv in ({}, {"metadata": "x"}, {"metadata": {"name": 3.5}}, "not-a-doc")))
+# The clearly-unreadable declarations (strategy/fuel/name faults) forfeit
+# pre-turn specifically, rather than merely not crashing.
+check("fault-hardening: unreadable strategy/fuel/name faults forfeit before turn 1",
+      all(run_vault_match(_mut(DEF, _f), RAID, seed=2)["turns"] == []
+          for _f in (_malformed["strategy non-dict (E2)"],
+                     _malformed["maxOutputTokens string (E1)"],
+                     _malformed["missing metadata.name (E9)"])))
+# E3: a string-numeral contextWindow must NOT buy fuel — weigh awards it 0 AU,
+# so granting a huge tank was a weight-class dodge. It now forfeits.
+_dodge = _cp.deepcopy(DEF)
+_dodge["model"]["requirements"]["contextWindow"] = "999999"
+check("E3: string-numeral contextWindow forfeits (no weight-class fuel dodge)",
+      run_vault_match(_dodge, RAID, seed=0, max_turns=200)["lifecycle"]["state"] == "forfeit")
+# E1: budget_gate does not raise on a non-numeric maxOutputTokens.
+from core.fuel import budget_gate as _bg
+check("E1: budget_gate fails closed (no crash) on non-numeric maxOutputTokens",
+      _bg({"model": {"requirements": {"maxOutputTokens": "512"}}}, 8000)["passed"] is False)
+check("E1: budget_gate tolerates a non-mapping model/requirements",
+      _bg({"model": "big"}, 8000)["passed"] is True
+      and _bg("not a doc", 8000)["passed"] is True)
+# E10: the non-terminal-trace guard is a real exception, not an assert (so it
+# survives python3 -O). _finalize raises when handed a non-terminal lifecycle.
+import core.arena as _arena_mod
+from core.lifecycle import MatchLifecycle as _MLC
+_raised_e10 = False
+try:
+    _arena_mod._finalize(["a", "b"], [], -1, "x", [True, True], [1, 1], [1, 1],
+                         0, lifecycle=_MLC())
+except Exception:
+    _raised_e10 = True
+check("E10: finalizing a non-terminal lifecycle raises (survives python3 -O)",
+      _raised_e10)
+
 # T-025 — illegal lifecycle transitions are unreachable: exhaustive sweep of
 # every (state, target) pair, reaching each state only via legal walks.
 _paths = {

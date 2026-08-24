@@ -29,12 +29,27 @@ class ExecutionLane:
         being fielded. A mismatch is an escape attempt (E1I): the lane emits a
         binding refusal and refuses every subsequent invocation — a bot cannot
         be weighed in one configuration and fielded in another (T-077)."""
-        self.subject = "agent:" + ((doc.get("metadata") or {}).get("name") or "unknown")
-        harness = doc.get("harness") or {}
-        self.tools = {t.get("id"): t for t in harness.get("tools") or []}
-        self.policies = list(harness.get("policies") or [])
-        network = (harness.get("runtime") or {}).get("network") or {}
-        self.egress_allowlist = list(network.get("allowlist") or [])
+        # Defensive reads: a malformed (non-mapping) container reads as empty
+        # rather than raising AttributeError (audit E2). The engine's fault
+        # check forfeits such a document; the lane must not crash constructing.
+        def _m(x):
+            return x if isinstance(x, dict) else {}
+        def _lst(x):
+            return x if isinstance(x, list) else []
+        _name = _m(doc.get("metadata")).get("name")
+        self.subject = "agent:" + (_name if isinstance(_name, str) and _name else "unknown")
+        harness = _m(doc.get("harness"))
+        # A tool id is used as a dict key, so it must be hashable: a list/dict
+        # id would raise 'unhashable type'. Skip tools whose id is not a
+        # str/number (audit re-review C2).
+        def _hashable_id(t):
+            tid = t.get("id")
+            return tid if isinstance(tid, (str, int, float)) and not isinstance(tid, bool) else None
+        self.tools = {_hashable_id(t): t for t in _lst(harness.get("tools"))
+                      if isinstance(t, dict) and _hashable_id(t) is not None}
+        self.policies = [p for p in _lst(harness.get("policies")) if isinstance(p, dict)]
+        network = _m(_m(harness.get("runtime")).get("network"))
+        self.egress_allowlist = list(_lst(network.get("allowlist")))
         self.events: list[dict] = []
         self._invocations: dict[str, int] = {}
         self.bound_hash = bound_hash
@@ -63,7 +78,15 @@ class ExecutionLane:
         resource = f"tool:{tool_id}"
         if self.escaped:
             return self._event(resource, action, False, "binding-mismatch")
-        if tool_id not in self.tools:
+        # A non-hashable id cannot be a declared tool (self.tools is keyed only
+        # by hashable ids) — refuse it as undeclared before the membership test
+        # so `tool_id not in self.tools` cannot raise 'unhashable type'
+        # (audit round-3 C).
+        try:
+            _declared = tool_id in self.tools
+        except TypeError:
+            _declared = False
+        if not _declared:
             return self._event(resource, action, False, "undeclared-tool")
         if self._matching(resource, action, "deny"):
             return self._event(resource, action, False, "denied-by-policy")
@@ -89,8 +112,20 @@ class ExecutionLane:
 
 
 def find_tool(doc: dict, fragment: str) -> str | None:
-    """First declared tool id containing the fragment (case-insensitive)."""
-    for tool in (doc.get("harness") or {}).get("tools") or []:
-        if fragment.lower() in str(tool.get("id", "")).lower():
-            return tool.get("id")
+    """First declared tool id containing the fragment (case-insensitive).
+    Tolerates a malformed harness/tools (audit E2): non-mapping entries are
+    skipped rather than raising."""
+    harness = doc.get("harness") if isinstance(doc, dict) else None
+    tools = harness.get("tools") if isinstance(harness, dict) else None
+    for tool in (tools if isinstance(tools, list) else []):
+        if not isinstance(tool, dict):
+            continue
+        tid = tool.get("id")
+        # Only a hashable scalar id can be invoked (the lane keys self.tools by
+        # it); a list/dict id whose string form matches the fragment must not
+        # be returned, or invoke() would hash it (audit round-3 C).
+        if not isinstance(tid, (str, int, float)) or isinstance(tid, bool):
+            continue
+        if fragment.lower() in str(tid).lower():
+            return tid
     return None

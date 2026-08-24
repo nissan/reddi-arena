@@ -96,19 +96,42 @@ def classify(au: int) -> str:
     return "Heavyweight"
 
 
+def _lst(x) -> list:
+    """Coerce a should-be-list to a list — a malformed (non-list) collection
+    reads as empty rather than raising 'not iterable' (audit E2)."""
+    return x if isinstance(x, list) else []
+
+
+def _key(x, default: str) -> str:
+    """Coerce an enum-lookup value to a hashable str; a non-str (list/dict)
+    would raise 'unhashable type' as a dict key / set member (audit E2)."""
+    return x if isinstance(x, str) else default
+
+
 def _tier(value: Any, divisor: int, per: int) -> int:
-    if not isinstance(value, (int, float)):
+    # bool is not a declaration; inf/nan overflow int(ceil()). For a huge int,
+    # float division would overflow to inf too — so use EXACT integer ceil
+    # division for ints (also removes a latent float-rounding path). Matches
+    # math.ceil(value/divisor) for every well-formed value.
+    if isinstance(value, bool):
         return 0
-    return int(math.ceil(value / divisor)) * per
+    if isinstance(value, int):
+        return (-(-value // divisor)) * per
+    if isinstance(value, float) and math.isfinite(value):
+        return int(math.ceil(value / divisor)) * per
+    return 0
 
 
 def _referenced_policy_ids(harness: dict) -> set[str]:
     """Only policies actually referenced by a capability earn the hygiene credit."""
     referenced: set[str] = set()
     for collection in ("tools", "functions"):
-        for item in harness.get(collection) or []:
-            for ref in item.get("policyRefs") or []:
-                referenced.add(ref)
+        for item in _lst(harness.get(collection)):
+            if not isinstance(item, dict):
+                continue
+            for ref in _lst(item.get("policyRefs")):
+                if isinstance(ref, str):
+                    referenced.add(ref)
     return referenced
 
 
@@ -131,31 +154,34 @@ TIER_LEVELS = {"rookie": 1, "open": 2, "title": 3}
 
 
 def _l1(doc: dict) -> bool:
-    return bool((doc.get("metadata") or {}).get("name")
+    return bool(_m(doc.get("metadata")).get("name")
                 and doc.get("model")
-                and (doc.get("harness") or {}).get("tools"))
+                and _m(doc.get("harness")).get("tools"))
 
 
 def _l2(doc: dict) -> bool:
-    harness = doc.get("harness") or {}
-    tools = harness.get("tools") or []
-    policies = harness.get("policies") or []
-    covered = {p.get("resource") for p in policies}
-    obs = harness.get("observability") or {}
+    harness = _m(doc.get("harness"))
+    tools = _lst(harness.get("tools"))
+    policies = _lst(harness.get("policies"))
+    covered = {p.get("resource") for p in policies
+               if isinstance(p, dict) and isinstance(p.get("resource"), str)}
+    obs = _m(harness.get("observability"))
     return bool(tools and obs.get("events")
-                and all(f"tool:{t.get('id')}" in covered for t in tools))
+                and all(isinstance(t, dict) and f"tool:{t.get('id')}" in covered
+                        for t in tools))
 
 
 def _l3(doc: dict) -> bool:
     # Evidence may live in conformance.evidenceRefs OR on the observability
     # events themselves — the lab-certified L3 reference mercenary declares
     # only the latter (finding F-012, reddiagent-lab#450).
-    obs = (doc.get("harness") or {}).get("observability") or {}
-    conf = doc.get("conformance") or {}
-    events = obs.get("events") or []
+    obs = _m(_m(doc.get("harness")).get("observability"))
+    conf = _m(doc.get("conformance"))
+    events = _lst(obs.get("events"))
     evidenced = bool(conf.get("evidenceRefs")
-                     or (events and all(e.get("evidenceRef") for e in events)))
-    return bool((obs.get("redaction") or {}).get("fields")
+                     or (events and all(isinstance(e, dict) and e.get("evidenceRef")
+                                        for e in events)))
+    return bool(_m(obs.get("redaction")).get("fields")
                 and obs.get("retention")
                 and evidenced)
 
@@ -199,7 +225,7 @@ def tier_verdict(doc: dict) -> dict:
     """
     assessment = assess_level(doc)
     assessed = assessment["arenaAssessedLevel"]
-    requested = (doc.get("conformance") or {}).get("requestedLevel")
+    requested = _m(doc.get("conformance")).get("requestedLevel")
     if requested is not None and (not isinstance(requested, int)
                                   or isinstance(requested, bool)):
         return {
@@ -243,13 +269,22 @@ def tier_verdict(doc: dict) -> dict:
     }
 
 
+def _m(x) -> dict:
+    """Coerce a value that should be a mapping to a dict — a malformed
+    (non-mapping) container reads as empty rather than raising AttributeError
+    on `.get` (audit E2). weigh() must not crash on an untrusted document;
+    run_vault_match's fault check then forfeits such a document."""
+    return x if isinstance(x, dict) else {}
+
+
 def weigh(doc: dict, hires: list[dict] | None = None) -> dict:
     """Return a full weigh-in certificate for an ADL document."""
     lines: list[tuple[str, int]] = []
 
-    model = doc.get("model") or {}
-    harness = doc.get("harness") or {}
-    reqs = model.get("requirements") or {}
+    doc = _m(doc)
+    model = _m(doc.get("model"))
+    harness = _m(doc.get("harness"))
+    reqs = _m(model.get("requirements"))
 
     lines.append(("chassis.base", CHASSIS_BASE))
     lines.append(("chassis.contextWindow", _tier(reqs.get("contextWindow"), 8000, 6)))
@@ -259,64 +294,87 @@ def weigh(doc: dict, hires: list[dict] | None = None) -> dict:
         if reqs.get(key) is True:
             lines.append((f"chassis.req.{key}", au))
 
-    for modality in reqs.get("modalities") or []:
-        au = MODALITY_AU.get(modality, 12)
+    for modality in _lst(reqs.get("modalities")):
+        au = MODALITY_AU.get(_key(modality, ""), 12)
         if au:
             lines.append((f"chassis.modality.{modality}", au))
 
-    for tool in harness.get("tools") or []:
+    for tool in _lst(harness.get("tools")):
+        if not isinstance(tool, dict):
+            continue
         tool_au = TOOL_BASE_AU
-        mode = ((tool.get("sideEffects") or {}).get("mode")) or "none"
+        mode = _key(_m(tool.get("sideEffects")).get("mode"), "none")
         tool_au += SIDE_EFFECT_AU.get(mode, 14)
         if tool.get("auditLevel") == "full":
             tool_au += AUDIT_FULL_AU
         lines.append((f"tool.{tool.get('id', '?')}", tool_au))
 
-    for fn in harness.get("functions") or []:
-        lines.append((f"function.{fn.get('id', '?')}", FUNCTION_AU))
+    for fn in _lst(harness.get("functions")):
+        if isinstance(fn, dict):
+            lines.append((f"function.{fn.get('id', '?')}", FUNCTION_AU))
 
-    for skill in harness.get("skills") or []:
-        lines.append((f"skill.{skill.get('id', '?')}", SKILL_AU))
+    for skill in _lst(harness.get("skills")):
+        if isinstance(skill, dict):
+            lines.append((f"skill.{skill.get('id', '?')}", SKILL_AU))
 
-    for src in harness.get("dataSources") or []:
-        src_au = SOURCE_TYPE_AU.get(src.get("type"), 8)
-        src_au += TRUST_AU.get(src.get("trust"), 6)
+    for src in _lst(harness.get("dataSources")):
+        if not isinstance(src, dict):
+            continue
+        src_au = SOURCE_TYPE_AU.get(_key(src.get("type"), ""), 8)
+        src_au += TRUST_AU.get(_key(src.get("trust"), ""), 6)
         lines.append((f"source.{src.get('id', '?')}", src_au))
 
-    memory_mode = (harness.get("memory") or {}).get("mode", "session")
+    memory_mode = _key(_m(harness.get("memory")).get("mode", "session"), "session")
     if MEMORY_AU.get(memory_mode, 25):
         lines.append((f"memory.{memory_mode}", MEMORY_AU.get(memory_mode, 25)))
 
     referenced = _referenced_policy_ids(harness)
     credit = 0
-    for policy in harness.get("policies") or []:
+    for policy in _lst(harness.get("policies")):
+        if not isinstance(policy, dict):
+            continue
         pid = policy.get("id")
         # Deny-effect policies always earn credit; allow-policies must be
         # referenced by a declared capability so no-op padding cannot farm credit.
-        if policy.get("effect") == "deny" or pid in referenced:
+        # (pid is only tested for set membership when it is a hashable str.)
+        if policy.get("effect") == "deny" or (isinstance(pid, str) and pid in referenced):
             credit += POLICY_CREDIT_AU
     credit = max(credit, POLICY_CREDIT_FLOOR)
     if credit:
         lines.append(("policy.hygiene-credit", credit))
 
-    intents = ((doc.get("extensions") or {}).get("x402") or {}).get("intents") or []
+    intents = _lst(_m(_m(doc.get("extensions")).get("x402")).get("intents"))
     for intent in intents:
-        lines.append((f"x402.intent.{intent.get('id', '?')}", PAYMENT_INTENT_AU))
+        if isinstance(intent, dict):
+            lines.append((f"x402.intent.{intent.get('id', '?')}", PAYMENT_INTENT_AU))
 
     solo_au = sum(au for _, au in lines)
 
     hire_lines: list[tuple[str, int]] = []
-    for hire in hires or []:
-        merc_au = hire["au"]
-        coupled = int(math.ceil(merc_au * COUPLING_FACTOR)) + ENGAGEMENT_OVERHEAD_AU
-        hire_lines.append((f"hire.{hire['name']}", coupled))
+    for hire in _lst(hires):
+        merc_au = _m(hire).get("au")
+        if not isinstance(merc_au, int) or isinstance(merc_au, bool):
+            merc_au = 0
+        # ceil(merc_au * 0.6) as EXACT integer math — merc_au * 0.6 (float)
+        # overflows for a huge malformed AU (audit re-review). COUPLING_FACTOR
+        # is 0.6 = 6/10.
+        coupled = -(-(merc_au * 6) // 10) + ENGAGEMENT_OVERHEAD_AU
+        hire_lines.append((f"hire.{_m(hire).get('name')}", coupled))
 
     fielded_au = solo_au + sum(au for _, au in hire_lines)
 
+    # These two raw fields flow into the JSON-canonical capability hash, so a
+    # non-serializable value (bytes/set) would crash json.dumps (audit
+    # re-review M1). Coerce to a serializable scalar; the tierVerdict below
+    # already handles the requestedLevel semantics separately.
+    _agent = _m(doc.get("metadata")).get("name")
+    _req_level = _m(doc.get("conformance")).get("requestedLevel")
     certificate = {
         "weightsVersion": WEIGHTS_VERSION,
-        "agent": (doc.get("metadata") or {}).get("name"),
-        "requestedConformanceLevel": (doc.get("conformance") or {}).get("requestedLevel"),
+        "agent": _agent if isinstance(_agent, str) else None,
+        "requestedConformanceLevel": _req_level
+            if isinstance(_req_level, (str, int, float)) and not isinstance(_req_level, bool)
+            else None,
         "soloAU": solo_au,
         "soloClass": classify(solo_au),
         "fieldedAU": fielded_au,
