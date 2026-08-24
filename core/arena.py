@@ -308,9 +308,14 @@ def run_vault_match(bot_a: dict, bot_b: dict, seed: int = 0,
     # a name would silently collapse one bot's evidence into the other's.
     # Distinct names are required; a collision voids the match before any
     # evidence is built.
-    if raw_names[0] is not None and raw_names[0] == raw_names[1]:
+    # Guard on the EFFECTIVE names (after placeholder assignment), not the raw
+    # declared names: a document literally named "unnamed-competitor-1" against
+    # an unnamed opponent collides on the effective key even though the raw
+    # names differ (audit review). Two unnamed docs stay distinct (their
+    # placeholders are index 0 vs 1), so this never false-voids.
+    if names[0] == names[1]:
         lc.advance("binding", "name-collision check")
-        _reason = (f"both competitors declare the same name {names[0]!r}; "
+        _reason = (f"both competitors resolve to the same name {names[0]!r}; "
                    f"match void (names must be distinct for auditable evidence)")
         lc.advance("void", _reason)
         return _finalize(names, [], -1, _reason, [True, True], [0, 0],
@@ -388,6 +393,7 @@ def run_vault_match(bot_a: dict, bot_b: dict, seed: int = 0,
     # moment it plays fails here as a defined pre-turn outcome.
     gates = [budget_gate(bot_a, fuel[0]), budget_gate(bot_b, fuel[1])]
     if not (gates[0]["passed"] and gates[1]["passed"]):
+        gate_failed = [names[i] for i in range(2) if not gates[i]["passed"]]
         if not gates[0]["passed"] and not gates[1]["passed"]:
             winner = -1
             reason = (f"both competitors fail the budget gate — {names[0]}: "
@@ -403,7 +409,7 @@ def run_vault_match(bot_a: dict, bot_b: dict, seed: int = 0,
             lc.advance("forfeit", reason)
         return _finalize(names, [], winner, reason, [True, True], fuel,
                          list(fuel), seed, lanes, bound_hashes, lc, meters,
-                         outcome_kind=_kind, at_fault=_fault)
+                         outcome_kind=_kind, at_fault=_fault, gate_failed=gate_failed)
 
     lc.advance("in-progress", "binding and declarations verified; turn loop opened")
     probe_tool = [find_tool(bot_a, "probe"), find_tool(bot_b, "probe")]
@@ -504,7 +510,7 @@ def _remaining(meters) -> list[int]:
 
 def _finalize(names, turns, winner, reason, secret_held, fuel, fuel_left, seed,
               lanes=None, bound_hashes=None, lifecycle=None, meters=None,
-              outcome_kind=None, at_fault=None) -> dict:
+              outcome_kind=None, at_fault=None, gate_failed=None) -> dict:
     # Audit E5/T3/T6: the machine-readable outcome and the at-fault competitors
     # are STRUCTURED fields, so downstream consumers (scoring, emit, audit,
     # chain settlement) never parse the human-readable `reason` string —
@@ -525,6 +531,10 @@ def _finalize(names, turns, winner, reason, secret_held, fuel, fuel_left, seed,
         "result": result,
         "outcomeKind": outcome_kind,
         "atFault": list(at_fault or []),
+        # Structural marker for WHICH competitors failed the pre-turn budget
+        # gate, so the emitted eval.checked event never has to parse the reason
+        # prose to label the gate (audit review minor).
+        "budgetGateFailed": list(gate_failed or []),
         "reason": reason,
         "rail": ARENA_RAIL,
         "prizeCurrency": ARENA_CURRENCY,

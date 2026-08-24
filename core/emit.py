@@ -121,12 +121,13 @@ def emit_events(trace: dict, doc_a: dict, doc_b: dict,
     # Attribution reads the STRUCTURED atFault list, never `name in reason` —
     # a prefix name would otherwise frame the innocent (audit T6).
     at_fault_set = set(trace.get("atFault") or [])
-    gate_failed_budget = trace.get("outcomeKind") in ("forfeit", "void") and \
-        "budget gate" in reason
+    # Budget-gate pass/fail is read from the STRUCTURED budgetGateFailed list,
+    # never from a reason substring — a name containing "budget gate" would
+    # otherwise mislabel a sputter forfeit (audit review minor).
+    gate_failed_set = set(trace.get("budgetGateFailed") or [])
     for name in trace["competitors"]:
-        gate_failed = gate_failed_budget and name in at_fault_set
         emit("eval.checked", name, {"gate": "budget-check",
-                                    "passed": not gate_failed})
+                                    "passed": name not in gate_failed_set})
     for name in trace["competitors"]:
         for e in (trace.get("laneEvents") or {}).get(name) or []:
             emit("policy.checked", name,
