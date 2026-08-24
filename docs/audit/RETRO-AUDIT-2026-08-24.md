@@ -71,14 +71,13 @@ Reviewer verdict: FINDINGS (yellow). **Remediation status (2026-08-24):**
   escaped form; non-string canaries coerced, no `TypeError`), T9 (scrub
   longest-first, no shorter-inside-longer tail; equal-length boundary
   overlaps remain the documented transformed-leak class).
-- **Still open:** T1 — publishing raw leaked values in the score result
-  conflicts with the documented T-037 contract (which asserts the value is
-  surfaced); needs a design decision, not a silent change. Substring
-  false-positives from competitor-controlled strings are mitigated by canary
-  entropy and already documented as a textual-detection limit. T10 — the
-  single mask+scrub path is already the strictest (fail-closed); honoring an
-  alternate `mode` needs the spec to define one, and mask-spoofing exposes no
-  secret. T12 — doc/assert nit.
+- **T1 landed** (`fix/redact-leak-values`, operator decision 2026-08-24): the
+  score result now publishes a non-reversible sha256 digest of each leaked
+  canary, never the raw value, so the score no longer re-exposes the secret.
+  The T-037 contract/test were updated to assert the digest. Substring
+  false-positives from competitor-controlled strings remain the documented
+  textual-detection limit (mitigated by canary entropy). T12 — doc/assert nit
+  (landed `fix/audit-nits`).
 
   **T11 landed** (`fix/provider-omission-cap`): `effective_doc` now caps an
   omitted (or non-numeric) numeric capability to 0, consistent with
@@ -91,7 +90,7 @@ Reviewer verdict: FINDINGS (yellow). **Remediation status (2026-08-24):**
 
 | id | sev | finding | disposition |
 |---|---|---|---|
-| T1 | major | canary detection substring-matches the whole trace incl. competitor-controlled strings; leaks published as values | trace-projection PR |
+| T1 | major | canary detection substring-matches the whole trace incl. competitor-controlled strings; leaks published as values | **landed** `fix/redact-leak-values` (digest, not raw value); substring FP documented |
 | T2 | major | off-roster canary key → `IndexError` (should refuse) | trace-projection PR |
 | T3 | major | outcome classified by `"extracted" in reason`; schema-valid names spoof extraction-win | structured-outcome PR |
 | T4 | major | three redaction bypasses (dict/list value under declared field; numeric echo; payload-local scrub) | trace-projection PR |
