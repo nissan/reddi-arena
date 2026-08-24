@@ -69,7 +69,8 @@ Reviewer verdict: FINDINGS (yellow). **Remediation status (2026-08-24):**
   canary key now ignored, no `IndexError`), T4 (structured/nested secret leaves
   are collected and scrubbed), T5 (JSON-escaped canaries detected via the
   escaped form; non-string canaries coerced, no `TypeError`), T9 (scrub
-  longest-first, no overlapping-secret tail).
+  longest-first, no shorter-inside-longer tail; equal-length boundary
+  overlaps remain the documented transformed-leak class).
 - **Still open:** T1 — publishing raw leaked values in the score result
   conflicts with the documented T-037 contract (which asserts the value is
   surfaced); needs a design decision, not a silent change. Substring

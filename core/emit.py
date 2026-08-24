@@ -20,10 +20,15 @@ Three properties, all deterministic:
     unredacted.
   * No secret survives (T-034): redaction is two-level. Declared fields
     are masked wherever they appear (any nesting, dicts or lists), and
-    every VALUE that appeared under a declared field is then scrubbed
-    from every string in the stream — so a secret echoed under some
-    other key is caught too. A canary planted anywhere a declared field
-    reaches cannot appear in the stored stream.
+    every VALUE that appeared under a declared field — including scalar
+    leaves nested inside a declared object or list — is then scrubbed
+    from every string in the stream, so a secret echoed under some other
+    key is caught too. A canary planted anywhere a declared field reaches
+    cannot appear in the stored stream as text. Out of scope (same
+    transformed-leak class as the scoring canary): a numeric secret
+    echoed as a raw JSON number under a non-declared key (the scrub
+    rewrites strings, not number literals), and equal-length secrets that
+    overlap on a shared boundary substring.
 
 Boundary: a trace records what happened. Emission neither establishes
 task success beyond the engine's stated outcome nor touches reputation.
@@ -55,7 +60,14 @@ def _collect_leaves(v, out: list) -> None:
     """Every scalar leaf reachable under a declared-secret value. A secret
     declared as a structured value (a credentials object, a list of keys) hides
     its actual secrets in its leaves; collecting only the container would let a
-    leaf echoed elsewhere survive the scrub (audit: structured-secret bypass)."""
+    leaf echoed elsewhere survive the scrub (audit: structured-secret bypass).
+
+    A boolean is skipped: it carries no secret (one bit), and it serializes as
+    `true`/`false` in the stream while `str(True)` is `"True"` — so collecting
+    it would never scrub the actual JSON form, only corrupt unrelated text that
+    happens to contain "True"/"False" (audit review: over-scrub)."""
+    if isinstance(v, bool):
+        return
     if isinstance(v, (str, int, float)):
         out.append(str(v))
     elif isinstance(v, dict):

@@ -1039,6 +1039,14 @@ _offroster["reason"] = _offroster["reason"] + " GHOST-CANARY-x"
 _sc_ghost = score_match(_offroster, canaries={"ghost-not-a-competitor": ["GHOST-CANARY-x"]})
 check("audit: an off-roster canary key is ignored, not crashed on",
       _sc_ghost["outcome"] == "draw" and _sc_ghost["leaks"] == {})
+# A boolean under a declared field is not a secret and must not turn every
+# "True"/"False" in the stream into [SCRUBBED] (audit review: over-scrub).
+_rp_bool = redact_payload(
+    {"enabled": True, "note": "run was True and complete"},
+    {"mode": "mask", "fields": ["enabled"]})
+check("audit: a boolean secret does not over-scrub literal True/False text",
+      _rp_bool["note"] == "run was True and complete"
+      and _rp_bool["enabled"] == "[REDACTED:enabled]")
 
 print("anti-gaming review (A6: T-013 T-014)")
 import copy as _cp
