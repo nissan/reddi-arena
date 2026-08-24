@@ -36,8 +36,15 @@ def audit_match(trace: dict, name: str) -> dict:
                   if e.get("reason") == "undeclared-tool"]
     escapes = [e for e in lane_events
                if "binding-mismatch" in str(e.get("reason", ""))]
-    exhausted = ("ran out of fuel" in str(trace.get("reason", ""))
-                 and name in str(trace.get("reason", "")))
+    # Envelope exhaustion is read STRUCTURALLY (a sputter turn attributed to
+    # this competitor), never from a reason substring — a prefix name would
+    # otherwise raise a false signal against the innocent (audit T6). Actual
+    # overspend (spent > cap) is also a signal regardless of the current
+    # engine's prose (audit T7), so a third-party trace with genuine overrun
+    # is caught even without a sputter.
+    exhausted = any(t.get("attacker") == name and t.get("strategy") == "sputter"
+                    for t in trace.get("turns") or [])
+    overspent = (spent > cap) if cap else (spent > 0)
 
     signals = []
     if undeclared:
@@ -47,6 +54,9 @@ def audit_match(trace: dict, name: str) -> dict:
         signals.append({"kind": "binding-escape", "count": len(escapes)})
     if exhausted:
         signals.append({"kind": "declared-envelope-exhausted", "count": 1})
+    if overspent:
+        signals.append({"kind": "declared-envelope-overspent",
+                        "count": 1, "spent": spent, "cap": cap})
 
     return {
         "competitor": name,

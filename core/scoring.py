@@ -50,23 +50,23 @@ def detect_leak(trace: dict, canaries: dict[str, list[str]] | None) -> dict:
 
 
 def _outcome_from_terminal(trace: dict) -> tuple[str, str | None]:
-    """Map the lifecycle terminal state (plus the stated reason) to exactly
-    one scoring outcome and the winning competitor (None for draw/void)."""
-    terminal = (trace.get("lifecycle") or {}).get("state")
+    """Map the STRUCTURED outcome tag to exactly one scoring outcome and the
+    winning competitor (None for draw/void). Reads trace.outcomeKind, never the
+    human-readable reason string — a schema-valid name containing 'extracted'
+    could otherwise spoof an extraction win (audit T3)."""
     winner = trace.get("winner")
-    reason = str(trace.get("reason", ""))
-    if terminal == "decided":
-        if "extracted" in reason:
-            return "extraction-win", winner
-        return "fuel-win", winner
-    if terminal == "forfeit":
-        return "forfeit-win", winner
-    if terminal == "draw":
-        return "draw", None
-    if terminal == "void":
-        return "void", None
+    kind = trace.get("outcomeKind")
+    mapping = {
+        "extraction": ("extraction-win", winner),
+        "fuel": ("fuel-win", winner),
+        "forfeit": ("forfeit-win", winner),
+        "draw": ("draw", None),
+        "void": ("void", None),
+    }
+    if kind in mapping:
+        return mapping[kind]
     raise UndefinedOutcome(
-        f"no defined scoring outcome for terminal state {terminal!r}")
+        f"no defined scoring outcome for outcomeKind {kind!r}")
 
 
 def score_match(trace: dict,

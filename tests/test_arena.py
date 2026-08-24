@@ -632,6 +632,60 @@ check("T-031 fuel accounting is hash-covered and deterministic",
       run_vault_match(_sput, _sput_b, seed=0, max_turns=200)["traceHash"]
       == _t30["traceHash"])
 
+print("structured trace outcomes (audit E4/E5/T3/T6/T8)")
+from core.audit import audit_match
+from core.emit import emit_events as _emit_events_so
+emit_events = _emit_events_so
+# The engine stamps a machine-readable outcomeKind and an atFault list; every
+# terminal carries them, and result distinguishes void from draw.
+_so_shapes = {
+    "extraction": run_vault_match(DEF, RAID, seed=3),
+    "forfeit": _forfeit,
+    "void": _both,
+}
+check("E5 outcomeKind is stamped and result distinguishes void from draw",
+      _so_shapes["extraction"]["outcomeKind"] == "extraction"
+      and _so_shapes["extraction"]["result"] == "decisive"
+      and _both["outcomeKind"] == "void" and _both["result"] == "void")
+check("E5/atFault names the faulty competitor(s) structurally",
+      _forfeit["atFault"] == [DEF["metadata"]["name"]]
+      and set(_both["atFault"]) == set(_both["competitors"]))
+check("E5 a clean decisive match has an empty atFault",
+      _so_shapes["extraction"]["atFault"] == [])
+# E4/T8: two competitors sharing a name void the match — no evidence collapse.
+_dupname = _cp.deepcopy(RAID)
+_dupname["metadata"]["name"] = DEF["metadata"]["name"]
+_dup_trace = run_vault_match(DEF, _dupname, seed=2)
+check("E4/T8 duplicate competitor names void the match before evidence is built",
+      _dup_trace["outcomeKind"] == "void" and _dup_trace["result"] == "void"
+      and "same name" in _dup_trace["reason"]
+      and "laneEvents" not in _dup_trace)
+# T6: prefix-name framing — 'vault' is not blamed when 'vaulter' forfeits.
+_frame_a = _cp.deepcopy(DEF); _frame_a["metadata"]["name"] = "vault"
+_frame_b = _cp.deepcopy(RAID); _frame_b["metadata"]["name"] = "vaulter"
+_frame_b["extensions"]["x-arena"]["strategy"] = {"attack": "x", "defense": 50}
+_frame_t = run_vault_match(_frame_a, _frame_b, seed=2)
+check("T6 attribution is structural: the innocent prefix name is not framed",
+      _frame_t["atFault"] == ["vaulter"]
+      and audit_match(_frame_t, "vault")["signals"] == [])
+# And the prefix name does not raise a false envelope-exhaustion signal when
+# the OTHER competitor genuinely sputters (the reason string names both).
+_ex_a = _cp.deepcopy(DEF); _ex_a["metadata"]["name"] = "ant"
+_ex_a["extensions"]["x-arena"]["strategy"] = {"attack": 0, "defense": 100}
+_ex_a["model"]["requirements"]["contextWindow"] = 2090
+_ex_b = _cp.deepcopy(RAID); _ex_b["metadata"]["name"] = "anteater"
+_ex_b["extensions"]["x-arena"]["strategy"] = {"attack": 0, "defense": 100}
+_ex_t = run_vault_match(_ex_a, _ex_b, seed=0, max_turns=200)
+check("T6 a prefix name gets no false exhaustion signal when another sputters",
+      any(s["kind"] == "declared-envelope-exhausted"
+          for s in audit_match(_ex_t, "ant")["signals"])
+      and all(s["kind"] != "declared-envelope-exhausted"
+              for s in audit_match(_ex_t, "anteater")["signals"]))
+_frame_em = emit_events(_frame_t, _frame_a, _frame_b)
+check("T6 emit marks only the faulty competitor task.failed",
+      [e["competitor"] for e in _frame_em["stream"] if e["event"] == "task.failed"]
+      == ["vaulter"])
+
 print("undeclared-capability reliance detection (E2I: T-080 T-081)")
 import core.audit as _audit_mod
 from core.audit import audit_match, flag_sustained, OVERRUN_TOLERANCE, DISPOSITIONS
@@ -804,13 +858,19 @@ check("T-036 points follow the outcome vocabulary",
       and sorted(score_match(_sc_trace)["points"].values()) == [0, 3]
       and all(v == 0 for v in score_match(_both)["points"].values()))
 _undef = _cp.deepcopy(_sc_trace)
-_undef["lifecycle"]["state"] = "sudden-death"
+_undef["outcomeKind"] = "sudden-death"  # unknown structured outcome tag
 try:
     score_match(_undef)
     _raised36 = False
 except UndefinedOutcome:
     _raised36 = True
-check("T-036 an unknown terminal state refuses rather than guessing", _raised36)
+check("T-036 an unknown outcomeKind refuses rather than guessing", _raised36)
+# T3: scoring reads the STRUCTURED outcomeKind, not the reason string — a
+# name containing 'extracted' in a fuel-win reason cannot spoof extraction.
+_spoof = _cp.deepcopy(_shapes36["fuel-win"])
+_spoof["reason"] = "self-extracted-bot won on fuel efficiency"
+check("T-036/T3 a reason containing 'extracted' does not spoof an extraction-win",
+      score_match(_spoof)["outcome"] == "fuel-win")
 
 # T-037 — a secret leaked in any form the canary detects scores as
 # extraction for the opponent, overriding the stated outcome.
