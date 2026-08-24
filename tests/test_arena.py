@@ -660,6 +660,20 @@ check("E4/T8 duplicate competitor names void the match before evidence is built"
       _dup_trace["outcomeKind"] == "void" and _dup_trace["result"] == "void"
       and "same name" in _dup_trace["reason"]
       and "laneEvents" not in _dup_trace)
+# The collision guard is on the EFFECTIVE names: a doc literally named
+# "unnamed-competitor-1" vs an unnamed opponent collides on the placeholder
+# key and must void (audit review MAJOR), while two unnamed docs keep
+# distinct index placeholders and do NOT collide.
+_ph_a = _cp.deepcopy(DEF); _ph_a["metadata"]["name"] = "unnamed-competitor-1"
+_ph_b = _cp.deepcopy(RAID); _ph_b["metadata"].pop("name")
+_ph_trace = run_vault_match(_ph_a, _ph_b, seed=3)
+check("E4 placeholder-name collision voids with no evidence collapse",
+      _ph_trace["outcomeKind"] == "void" and "laneEvents" not in _ph_trace)
+_u_a = _cp.deepcopy(DEF); _u_a["metadata"].pop("name")
+_u_b = _cp.deepcopy(RAID); _u_b["metadata"].pop("name")
+check("E4 two unnamed docs keep distinct placeholders (no false collision)",
+      run_vault_match(_u_a, _u_b, seed=3)["competitors"]
+      == ["unnamed-competitor-0", "unnamed-competitor-1"])
 # T6: prefix-name framing — 'vault' is not blamed when 'vaulter' forfeits.
 _frame_a = _cp.deepcopy(DEF); _frame_a["metadata"]["name"] = "vault"
 _frame_b = _cp.deepcopy(RAID); _frame_b["metadata"]["name"] = "vaulter"
@@ -685,6 +699,19 @@ _frame_em = emit_events(_frame_t, _frame_a, _frame_b)
 check("T6 emit marks only the faulty competitor task.failed",
       [e["competitor"] for e in _frame_em["stream"] if e["event"] == "task.failed"]
       == ["vaulter"])
+# The budget-check eval.checked label reads the structural budgetGateFailed
+# list, so a sputter forfeit by a bot named "budget gate hero" is not
+# mislabeled as a budget-gate failure (audit review MINOR).
+_bgh = _cp.deepcopy(DEF); _bgh["metadata"]["name"] = "budget gate hero"
+_bgh["extensions"]["x-arena"]["strategy"] = {"attack": 0, "defense": 100}
+_bgh["model"]["requirements"]["contextWindow"] = 2090
+_bgh_b = _cp.deepcopy(RAID); _bgh_b["extensions"]["x-arena"]["strategy"] = {"attack": 0, "defense": 100}
+_bgh_t = run_vault_match(_bgh, _bgh_b, seed=0, max_turns=200)
+_bgh_em = emit_events(_bgh_t, _bgh, _bgh_b)
+check("T6 a sputter forfeit does not mislabel the budget-check eval event",
+      _bgh_t["budgetGateFailed"] == []
+      and all(e["payload"]["passed"] for e in _bgh_em["stream"]
+              if e["event"] == "eval.checked"))
 
 print("undeclared-capability reliance detection (E2I: T-080 T-081)")
 import core.audit as _audit_mod
