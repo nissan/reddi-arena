@@ -273,7 +273,7 @@ nodes:
 - id: A7
   type: implementation
   title: Map conformance levels to league tiers
-  status: ready
+  status: done
   objective: This is the teaching mechanism — players learn the spec by ranking up, not by
     reading it.
   epic: E03
@@ -299,6 +299,16 @@ nodes:
     - test-output
     - pr-review
     - spdd artifact (spdd/prompt/*-a7-*.md) Sync Log updated
+    recorded:
+    - 'PR #61 (merged 2026-08-24, closes #7): T-015/T-016 implemented — Arena-local
+      assessment ladder in tools/weigh_in.py with tier verdict hash-covered in
+      the certificate; eligibility anchors to min(requestedLevel,
+      arenaAssessedLevel), reproducing the lab checker verdicts (DEF 1, MERC 3);
+      purse/hiring Title-only. FIRST NODE THROUGH THE INDEPENDENT-REVIEW GATE:
+      reviewer returned REQUEST-CHANGES (8 findings incl. a blocker — the
+      initial ladder rejected the lab-certified-L3 mercenary), all resolved or
+      rebutted at f2381c9 with the outcome table on the PR thread; spec
+      ambiguity filed as F-012 (reddiagent-lab#450); suite 198->207.'
   boundary: Reaching a tier grants match eligibility only. It never grants provider, network,
     wallet, or rail access.
   surfaces:
