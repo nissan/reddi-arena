@@ -142,6 +142,31 @@ check("L4 an authorized probe still extracts (fixtures unchanged)",
       any(run_vault_match(DEF, RAID, seed=s)["outcomeKind"] == "extraction"
           for s in range(10)))
 
+# Audit E8: the turn-limit tie-break is on the larger remaining fuel RESERVE
+# (honest naming — every turn costs the same flat cost, so it is not
+# "efficiency"), and it is parity-fair — on an odd max_turns the seed-chosen
+# opener takes one extra attack, and crediting that flat cost back means two
+# equal-fuel bots draw instead of the opener losing purely by parity.
+import copy as _cp_e8
+_e8_a = _cp_e8.deepcopy(DEF)
+_e8_b = _cp_e8.deepcopy(RAID)
+for _d in (_e8_a, _e8_b):
+    _d["extensions"]["x-arena"]["strategy"] = {"attack": 0, "defense": 100}
+    _d["model"]["requirements"]["contextWindow"] = 8000  # equal reserves
+check("E8 equal-fuel bots draw at odd max_turns (no seed-parity bias)",
+      all(run_vault_match(_e8_a, _e8_b, seed=s, max_turns=11)["outcomeKind"] == "draw"
+          for s in range(20)))
+check("E8 equal-fuel bots also draw at even max_turns (adjustment is a no-op)",
+      all(run_vault_match(_e8_a, _e8_b, seed=s, max_turns=12)["outcomeKind"] == "draw"
+          for s in range(20)))
+_e8_big = _cp_e8.deepcopy(_e8_a)
+_e8_big["model"]["requirements"]["contextWindow"] = 200000  # a genuinely larger reserve
+_e8_win = run_vault_match(_e8_big, _e8_b, seed=1, max_turns=12)
+check("E8 a genuinely larger reserve wins, named honestly (not 'efficiency')",
+      _e8_win["outcomeKind"] == "fuel"
+      and "fuel reserve" in _e8_win["reason"]
+      and "efficiency" not in _e8_win["reason"])
+
 print("conformance levels to league tiers (A7: T-015 T-016)")
 import copy as _cp_a7
 from weigh_in import weigh as _w_a7, tier_verdict, assess_level, TIER_LEVELS
