@@ -11,9 +11,9 @@ Without a balance harness, the first dominant strategy ends the format's competi
 
 **DoD checklist:**
 
-- [ ] Attacker/defender win split falls within the published tolerance band
-- [ ] No single archetype exceeds the published dominance threshold
-- [ ] The balance report is published before the season opens
+- [x] Attacker/defender win split falls within the published tolerance band
+- [x] No single archetype exceeds the published dominance threshold
+- [x] The balance report is published before the season opens
 
 ## E — Entities / Handoff Objects
 
@@ -90,3 +90,4 @@ Balance findings inform format v0.2; they do not retroactively alter results.
 | Date | Divergence | Artifact update | Code/test update |
 |---|---|---|---|
 | 2026-08-05 | Generated from plan/backlog.yaml (ready) | initial | n/a |
+| 2026-08-24 | Artifact staleness (DISCOVER): most of the harness predates the node — tools/simulate.py (round-robin, mirror-position bias, power-up impact, published BANDS, non-zero exit on drift) and the suite's balance-regression section shipped with the preview; docs/BALANCE-REPORT.md is already published. Verify-and-formalize scope: the one missing O2 measure — explicit attack/defence win asymmetry — added as attack_defence_split() with published band (0.35, 0.65) wired into the harness verdict; T-038/T-039 landed as labeled suite checks (split in band; dominance + report-published); the P1 exit-gate evidence (100 consecutive matches, complete terminal traces, zero policy escapes) measured here because the balance harness is the e2e surface. 200-seed run: split 59.9%, verdict BALANCED; report republished with the asymmetry section. | this row | tools/simulate.py (+attack_defence_split, +band, verdict wiring, report line); docs/BALANCE-REPORT.md (+asymmetry section); suite 194→198 (T-038 ×1, T-039 ×2, P1 exit gate ×1) |

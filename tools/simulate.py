@@ -40,6 +40,11 @@ BANDS = {
     "archetype_dominance_max": 0.70,          # no archetype may exceed this win rate
     "powerup_winrate_max": 0.90,              # a hire must not be an auto-win
     "decisive_rate_min": 0.50,                # matches should mostly resolve, not stall
+    # B7 / T-038: share of cohort win rate held by attack-leaning archetypes
+    # versus defense-leaning ones. 0.5 is perfect symmetry; the format may
+    # lean toward attack (extraction is how you score) but not collapse into
+    # attack-only viability.
+    "attack_defence_split": (0.35, 0.65),
 }
 
 # Archetypes, expressed the way a player would build them: as x-arena strategy.
@@ -131,6 +136,23 @@ def mirror_position_bias(base: dict, seeds: int) -> dict:
             "decided": decided, "perArchetype": per_archetype}
 
 
+def attack_defence_split(rr: dict) -> dict:
+    """Attack/defence win asymmetry (B7 / T-038), computed from a round-robin
+    result. Archetypes are cohorted by their declared lean (attack > defense
+    vs defense > attack; neutral excluded); the split is the attack cohort's
+    share of the two cohort mean win rates. 0.5 = perfect symmetry."""
+    atk = [n for n, s in ARCHETYPES.items() if s["attack"] > s["defense"]]
+    dfn = [n for n, s in ARCHETYPES.items() if s["defense"] > s["attack"]]
+    atk_mean = statistics.mean(rr["winRate"][n] for n in atk) if atk else 0
+    dfn_mean = statistics.mean(rr["winRate"][n] for n in dfn) if dfn else 0
+    total = atk_mean + dfn_mean
+    return {
+        "attackCohort": sorted(atk), "defenceCohort": sorted(dfn),
+        "attackMeanWinRate": atk_mean, "defenceMeanWinRate": dfn_mean,
+        "split": atk_mean / total if total else 0.5,
+    }
+
+
 def powerup_impact(base: dict, hire: dict, seeds: int) -> dict:
     """Head-to-head across all archetype pairs: solo vs one side hiring."""
     names = list(ARCHETYPES)
@@ -172,8 +194,13 @@ def main() -> int:
     rr = round_robin(base, args.seeds)
     mirror = mirror_position_bias(base, args.seeds)
     pw = powerup_impact(base, hire, max(args.seeds // 4, 25))
+    split = attack_defence_split(rr)
 
     failures = []
+    s_lo, s_hi = BANDS["attack_defence_split"]
+    if not s_lo <= split["split"] <= s_hi:
+        failures.append(f"attack/defence split {split['split']:.3f} outside "
+                        f"[{s_lo}, {s_hi}]")
     lo, hi = BANDS["first_mover_advantage"]
     # Measured on MIRROR matches: identical strategies, so any deviation from
     # 50% is pure positional bias rather than archetype strength.
@@ -195,6 +222,7 @@ def main() -> int:
         "roundRobin": rr,
         "mirrorPositionBias": mirror,
         "powerUp": pw,
+        "attackDefenceSplit": split,
         "bands": BANDS,
         "failures": failures,
         "verdict": "BALANCED" if not failures else "OUT-OF-BAND",
@@ -215,6 +243,9 @@ def main() -> int:
     print(f"    {C_DIM}identical strategies both sides, so this is pure slot advantage{C_DIM_END}")
     print(f"  side-A rate over round robin    {rr['sideAWinRate']:6.1%}  "
           f"(confounded by archetype ordering; not a balance signal)")
+    print(f"  attack/defence split           {split['split']:6.1%}  "
+          f"band [{BANDS['attack_defence_split'][0]:.0%}–"
+          f"{BANDS['attack_defence_split'][1]:.0%}]")
     print(f"  decisive (non-draw) rate       {rr['decisiveRate']:6.1%}")
     print(f"  mean turns per match           {rr['meanTurns']:6.2f}")
 
