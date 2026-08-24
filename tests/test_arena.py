@@ -1216,6 +1216,15 @@ check("hardening: _client_key prefers the left-most X-Forwarded-For hop",
       _srv2._client_key(type("H", (), {
           "headers": {"X-Forwarded-For": "1.2.3.4, 10.0.0.1"},
           "client_address": ("10.0.0.1", 5)})()) == "1.2.3.4")
+# The rate-limit map is hard-capped (LRU): rotating a spoofable forwarded-for
+# value cannot grow it past MAX_RATE_KEYS — no unbounded memory, no O(n) scan.
+_srv2.MAX_RATE_KEYS = 100
+_srv2._SIGNUP_HITS.clear()
+for _k in range(1000):
+    _srv2._rate_ok(f"rot:{_k}")
+check("hardening: rate-limit map is hard-capped under key rotation (no unbounded growth)",
+      len(_srv2._SIGNUP_HITS) <= 100)
+_srv2._SIGNUP_HITS.clear()
 # The ledger match history is ring-buffered, so /api/fight cannot grow the
 # store without bound (standings remain complete).
 _srv2.MAX_LEDGER_MATCHES = 5

@@ -24,7 +24,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
-from collections import deque
+from collections import deque, OrderedDict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
@@ -63,15 +63,19 @@ SIGNUP_RATE_MAX = 20                # per-client signups allowed within the wind
 FIGHT_RATE_MAX = 60                 # per-client match writes allowed within the window
 SIGNUP_RATE_WINDOW = 60.0           # seconds
 SOCKET_READ_TIMEOUT = 15.0          # per-connection read timeout
+MAX_RATE_KEYS = 20_000              # hard cap on the rate-limit map (LRU-evicted)
 
 # Stores share these across the ThreadingHTTPServer's handler threads: one lock
 # serializes the read-modify-write of every JSON store so concurrent requests
 # cannot lose entries or observe a half-written file.
 _STORE_LOCK = threading.RLock()
-# Per-IP signup timestamps for a lightweight fixed-window rate limit. Bounded by
-# active client count within the window; pruned on each check.
+# Per-client hit timestamps for a lightweight fixed-window rate limit. The key
+# is derived from a spoofable X-Forwarded-For, so the map is an LRU with a HARD
+# size cap: an attacker rotating the forwarded value churns their own buckets
+# out in O(1) and can never grow the map past MAX_RATE_KEYS (evicting a
+# legitimate bucket only fails open — that client simply gets a fresh window).
 _RATE_LOCK = threading.Lock()
-_SIGNUP_HITS: dict[str, deque] = {}
+_SIGNUP_HITS: "OrderedDict[str, deque]" = OrderedDict()
 
 
 def _read_json(path, default):
@@ -145,18 +149,24 @@ def _client_key(handler):
 def _rate_ok(client_key, limit=None):
     """Fixed-window per-client limit for unauthenticated writes. `limit` is
     the cap for the calling endpoint within SIGNUP_RATE_WINDOW; resolved at
-    call time so an operator/test override of the module constant applies."""
+    call time so an operator/test override of the module constant applies.
+
+    The hit map is an LRU with a hard size cap: each operation is O(1), and a
+    client rotating a spoofed forwarded-for value can never grow it past
+    MAX_RATE_KEYS — its own oldest buckets are evicted first."""
     if limit is None:
         limit = SIGNUP_RATE_MAX
     now = time.monotonic()
     with _RATE_LOCK:
-        # Bound the map first: evict empty/stale buckets so a client rotating
-        # its forwarded-for value cannot grow it without limit.
-        if len(_SIGNUP_HITS) > 10_000:
-            for ip in [k for k, v in _SIGNUP_HITS.items()
-                       if not v or now - v[-1] > SIGNUP_RATE_WINDOW]:
-                _SIGNUP_HITS.pop(ip, None)
-        hits = _SIGNUP_HITS.setdefault(client_key, deque())
+        hits = _SIGNUP_HITS.get(client_key)
+        if hits is None:
+            hits = deque()
+            _SIGNUP_HITS[client_key] = hits
+            # Hard cap, O(1): drop the least-recently-used bucket(s).
+            while len(_SIGNUP_HITS) > MAX_RATE_KEYS:
+                _SIGNUP_HITS.popitem(last=False)
+        else:
+            _SIGNUP_HITS.move_to_end(client_key)  # mark recently used
         while hits and now - hits[0] > SIGNUP_RATE_WINDOW:
             hits.popleft()
         if len(hits) >= limit:
