@@ -11,9 +11,9 @@ The subtler cheat is not declaring a tool but relying on capacity beyond the dec
 
 **DoD checklist:**
 
-- [ ] Declared-versus-actual usage is measured on every match
-- [ ] Sustained overrun is flagged with the measured delta
-- [ ] No automatic ban occurs without human review
+- [x] Declared-versus-actual usage is measured on every match
+- [x] Sustained overrun is flagged with the measured delta
+- [x] No automatic ban occurs without human review
 
 ## E — Entities / Handoff Objects
 
@@ -90,3 +90,4 @@ Detection flags a discrepancy; adjudication is a separate human-reviewed step.
 | Date | Divergence | Artifact update | Code/test update |
 |---|---|---|---|
 | 2026-08-05 | Generated from plan/backlog.yaml (ready) | initial | n/a |
+| 2026-08-24 | Artifact staleness (DISCOVER): written before B4/E1I existed. Post-B4, every trace already carries the declared envelope and actual usage (fuelAccounting) plus every lane decision (laneEvents) — so detection became a PURE FUNCTION OVER TRACE EVIDENCE rather than a live monitor: a third party can rerun the audit from the published trace alone. O1's "context and output usage" measures via the ledger (utilization) and lane refusals; "sustained overrun" is signals in ≥ OVERRUN_TOLERANCE (3, published) matches of a series; O3 is structural — the module's only dispositions are no-action / review-required, no ban mechanism exists, and T-081 asserts that by inspecting the module surface. Undeclared-invocation signals cannot yet arise in-engine (the engine invokes only declared tools), so that path is tested by auditing real lane refusal events as trace evidence. | this row | `core/audit.py` (audit_match, flag_sustained, OVERRUN_TOLERANCE, DISPOSITIONS); suite 164→174 (T-080 ×5, T-081 ×5) |

@@ -427,6 +427,77 @@ check("T-031 fuel accounting is hash-covered and deterministic",
       run_vault_match(_sput, _sput_b, seed=0, max_turns=200)["traceHash"]
       == _t30["traceHash"])
 
+print("undeclared-capability reliance detection (E2I: T-080 T-081)")
+import core.audit as _audit_mod
+from core.audit import audit_match, flag_sustained, OVERRUN_TOLERANCE, DISPOSITIONS
+
+# T-080 — declared-versus-actual usage is measurable on every match, from
+# the trace alone: seed sweep plus every terminal shape produced above
+# (escape forfeit, both-escape void, budget-gate forfeit, mid-turn sputter).
+_t80_shapes = [run_vault_match(DEF, RAID, seed=_s) for _s in range(10)]
+_t80_shapes += [_forfeit, _both, _t29, _t30]
+_t80_ok = True
+for _t in _t80_shapes:
+    for _n in _t["competitors"]:
+        _a = audit_match(_t, _n)
+        _t80_ok = (_t80_ok
+                   and set(_a) == {"competitor", "declaredCap", "spent",
+                                   "utilization", "signals"}
+                   and 0.0 <= _a["utilization"] <= 1.0
+                   and _a["spent"] == _t["fuelAccounting"][_n]["spent"])
+check("T-080 audit measures declared-vs-actual on every match shape", _t80_ok)
+check("T-080 a clean reference match raises no signals",
+      all(audit_match(_t80_shapes[3], _n)["signals"] == []
+          for _n in _t80_shapes[3]["competitors"]))
+check("T-080 a binding escape is a reliance signal for the escapee only",
+      any(s["kind"] == "binding-escape"
+          for s in audit_match(_forfeit, DEF["metadata"]["name"])["signals"])
+      and audit_match(_forfeit, RAID["metadata"]["name"])["signals"] == [])
+check("T-080 envelope exhaustion is a reliance signal with usage measured",
+      any(s["kind"] == "declared-envelope-exhausted"
+          for s in audit_match(_t30, DEF["metadata"]["name"])["signals"])
+      and audit_match(_t30, DEF["metadata"]["name"])["utilization"] > 0.99)
+# An undeclared-invocation refusal in the lane evidence is a signal. The
+# engine only invokes declared tools, so the refusal events are produced by
+# a real lane and audited as trace evidence (the audit is a pure function
+# over the evidence structure).
+_probe_lane = ExecutionLane(DEF)
+_probe_lane.invoke("hiddenProbe")
+_probe_lane.invoke("hiddenProbe")
+_grafted = _cp.deepcopy(_t80_shapes[3])
+_grafted["laneEvents"][DEF["metadata"]["name"]] = list(_probe_lane.events)
+_g_audit = audit_match(_grafted, DEF["metadata"]["name"])
+check("T-080 undeclared invocation attempts surface with their count",
+      any(s["kind"] == "undeclared-invocation-attempt" and s["count"] == 2
+          for s in _g_audit["signals"]))
+
+# T-081 — sustained overrun is flagged with the measured delta and routed
+# to review; no automatic ban exists, structurally.
+_series = [audit_match(_grafted, DEF["metadata"]["name"]),
+           audit_match(_forfeit, DEF["metadata"]["name"]),
+           audit_match(_t30, DEF["metadata"]["name"]),
+           audit_match(_t80_shapes[3], DEF["metadata"]["name"]),
+           audit_match(_t80_shapes[4], DEF["metadata"]["name"])]
+_flag = flag_sustained(_series)
+check("T-081 sustained overrun flags with the aggregated measured delta",
+      _flag["flagged"] and _flag["matchesWithSignals"] == 3
+      and _flag["measuredDelta"]["undeclared-invocation-attempt"] == 2
+      and _flag["measuredDelta"]["binding-escape"] >= 1
+      and _flag["measuredDelta"]["declared-envelope-exhausted"] == 1)
+check("T-081 flagged disposition is review, never enforcement",
+      _flag["disposition"] == "review-required"
+      and "human" in _flag["adjudication"])
+check("T-081 below the published tolerance is no-action",
+      not flag_sustained(_series[2:])["flagged"]
+      and flag_sustained(_series[2:])["disposition"] == "no-action")
+check("T-081 no ban mechanism exists in the audit module",
+      "ban" not in DISPOSITIONS
+      and all(d in DISPOSITIONS for d in ("no-action", "review-required"))
+      and not any("ban" in _k.lower() for _k in vars(_audit_mod)
+                  if not _k.startswith("_")))
+check("T-081 an empty audit series is safe and unflagged",
+      flag_sustained([])["flagged"] is False)
+
 print("anti-gaming review (A6: T-013 T-014)")
 import copy as _cp
 from weigh_in import weigh as _weigh
