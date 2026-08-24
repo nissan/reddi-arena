@@ -622,7 +622,7 @@ nodes:
 - id: B7
   type: implementation
   title: Format balance harness
-  status: ready
+  status: done
   objective: Without a balance harness, the first dominant strategy ends the format's competitive
     life.
   epic: E06
@@ -647,6 +647,15 @@ nodes:
     - test-output
     - pr-review
     - spdd artifact (spdd/prompt/*-b7-*.md) Sync Log updated
+    recorded:
+    - 'PR #60 (merged 2026-08-24, closes #15): T-038/T-039 implemented —
+      attack_defence_split() with published band (0.35,0.65) wired into the
+      simulate.py verdict (200-seed run: split 59.9%, BALANCED), BALANCE-REPORT
+      republished with the asymmetry section, labeled suite checks, and the
+      P1 exit-gate evidence (100 consecutive matches, complete terminal traces,
+      zero policy escapes) green; suite 194->198; E06 epic complete and the
+      B-lane P1 chain (B1-B7) fully done; Sync Log records the
+      verify-and-formalize scope.'
   boundary: Balance findings inform format v0.2; they do not retroactively alter results.
   surfaces:
     allow: *id002
