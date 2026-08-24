@@ -88,7 +88,7 @@ def flag_sustained(audits: list[dict]) -> dict:
             delta[s["kind"]] = delta.get(s["kind"], 0) + s["count"]
     flagged = len(with_signals) >= OVERRUN_TOLERANCE
     return {
-        "competitor": audits[0]["competitor"] if audits else None,
+        "competitor": audits[0].get("competitor") if audits else None,
         "matchesAudited": len(audits),
         "matchesWithSignals": len(with_signals),
         "measuredDelta": delta,
