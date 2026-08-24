@@ -61,7 +61,7 @@ the engineering loop runs *inside* the node:
 ```bash
 pip install pyyaml jsonschema solders --break-system-packages
 
-python3 tests/test_arena.py            # 256 checks — must pass before any PR
+python3 tests/test_arena.py            # 260 checks — must pass before any PR
 python3 tools/validate_adl.py          # schema gate against pinned v0.2
 python3 tools/simulate.py --seeds 200  # balance sweep; regen BALANCE-REPORT if engine changed
 python3 tools/graph_lint.py            # graph invariants G1-G7 + READY frontier

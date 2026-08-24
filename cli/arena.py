@@ -158,7 +158,11 @@ def cmd_fight(args):
     b = load_adl(args.bot_b)
     hire_a = load_adl(args.hire_a) if args.hire_a else None
     hire_b = load_adl(args.hire_b) if args.hire_b else None
-    trace = run_vault_match(a, b, seed=args.seed, hire_a=hire_a, hire_b=hire_b)
+    # When an entered class is stated, run_vault_match enforces the draft
+    # class ceiling — an illegal fielding forfeits before turn 1 (audit E7/L2).
+    trace = run_vault_match(a, b, seed=args.seed, hire_a=hire_a, hire_b=hire_b,
+                            entered_a=getattr(args, "class_a", None),
+                            entered_b=getattr(args, "class_b", None))
 
     print(f"{C.B}VAULT MATCH{C.R}  {trace['competitors'][0]} {C.DIM}vs{C.R} {trace['competitors'][1]}"
           f"  {C.DIM}seed {trace['seed']}{C.R}")
@@ -323,6 +327,10 @@ def main():
     p.add_argument("--class", dest="_class", default="Antweight"); p.set_defaults(fn=cmd_draft)
     p = sub.add_parser("fight"); p.add_argument("bot_a"); p.add_argument("bot_b")
     p.add_argument("--hire-a", dest="hire_a"); p.add_argument("--hire-b", dest="hire_b")
+    p.add_argument("--class-a", dest="class_a",
+                   help="entered class for A; enforces the draft ceiling on --hire-a")
+    p.add_argument("--class-b", dest="class_b",
+                   help="entered class for B; enforces the draft ceiling on --hire-b")
     p.add_argument("--seed", type=int, default=0); p.add_argument("--out")
     p.set_defaults(fn=cmd_fight)
     p = sub.add_parser("replay"); p.add_argument("trace"); p.set_defaults(fn=cmd_replay)

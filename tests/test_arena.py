@@ -80,6 +80,29 @@ check("refusal shows the AU delta", d_ant.au_delta == 65 and d_ant.fielded_au ==
 d_beetle = evaluate_hire(DEF, MERC, "Beetleweight")
 check("same hire allowed at Beetleweight", d_beetle.allowed)
 
+# Audit E7/L2: the draft class ceiling is ENFORCED in the match, not advisory.
+# When the caller states the entered class, a hire that breaches it is an
+# illegal fielding — a pre-turn forfeit. With no entered class stated (internal
+# balance/parity runs), the hire plays as before, so the sweep is unchanged.
+_e7_plays = [run_vault_match(DEF, RAID, seed=s, hire_a=MERC)["winner"]
+             for s in range(30)]
+check("E7/L2 with no entered class stated the hire plays (balance-neutral)",
+      [run_vault_match(DEF, RAID, seed=s, hire_a=MERC, entered_a="Beetleweight")["winner"]
+       for s in range(30)] == _e7_plays)
+_e7_illegal = [run_vault_match(DEF, RAID, seed=s, hire_a=MERC, entered_a="Antweight")
+               for s in range(30)]
+check("E7/L2 a class-breaching hire forfeits before turn 1",
+      all(t["outcomeKind"] == "forfeit" and t["winner"] == RAID["metadata"]["name"]
+          and DEF["metadata"]["name"] in t["atFault"] for t in _e7_illegal))
+_e7_void = run_vault_match(DEF, RAID, seed=1, hire_a=MERC, hire_b=MERC,
+                           entered_a="Antweight", entered_b="Antweight")
+check("E7/L2 both fielding illegal hires voids the match",
+      _e7_void["outcomeKind"] == "void"
+      and set(_e7_void["atFault"]) == {DEF["metadata"]["name"], RAID["metadata"]["name"]})
+_e7_legal = run_vault_match(DEF, RAID, seed=1, hire_a=MERC, entered_a="Beetleweight")
+check("E7/L2 a hire legal at the entered class is not a forfeit",
+      _e7_legal["outcomeKind"] not in ("forfeit", "void"))
+
 print("conformance levels to league tiers (A7: T-015 T-016)")
 import copy as _cp_a7
 from weigh_in import weigh as _w_a7, tier_verdict, assess_level, TIER_LEVELS
