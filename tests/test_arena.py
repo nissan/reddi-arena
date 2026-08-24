@@ -1080,7 +1080,9 @@ check("T-034 undeclared-redaction payload is withheld, canary never stored",
       not stream_contains(_em_nr, _canary) and stream_contains(_em_nr, "withheld"))
 
 print("vault attack/defend scoring (B6: T-035 T-036 T-037)")
-from core.scoring import score_match, detect_leak, UndefinedOutcome, POINTS
+from core.scoring import (score_match, detect_leak, UndefinedOutcome, POINTS,
+                          _leak_digest)
+import json as _json_b6
 
 # T-035 — identical traces always produce identical scores; scoring is a
 # pure function of the trace.
@@ -1137,7 +1139,10 @@ _sc37 = score_match(_leaky, canaries=_cmap)
 check("T-037 a detected canary leak scores as extraction for the opponent",
       _sc37["outcome"] == "extraction-win"
       and _sc37["winner"] == _dr_b["metadata"]["name"]
-      and _sc37["leaks"] == {_fw_a["metadata"]["name"]: [_canary37]})
+      # T1 (audit): the score result publishes a non-reversible digest of the
+      # leaked canary, never the raw secret value.
+      and _sc37["leaks"] == {_fw_a["metadata"]["name"]: [_leak_digest(_canary37)]}
+      and _canary37 not in _json_b6.dumps(_sc37))
 check("T-037 a clean trace with canaries declared scores unchanged",
       score_match(_shapes36["draw"], canaries=_cmap)["outcome"] == "draw"
       and detect_leak(_shapes36["draw"], _cmap) == {})

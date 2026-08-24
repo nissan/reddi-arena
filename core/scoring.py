@@ -19,7 +19,22 @@ Boundary: scoring is deterministic given a trace; it does not judge intent.
 """
 from __future__ import annotations
 
+import hashlib
 import json
+
+# Length of the published leak digest (hex chars). A short prefix is enough to
+# prove a specific canary leaked (an auditor hashes the known canary and
+# compares) without the score result itself carrying the secret value.
+_LEAK_DIGEST_LEN = 16
+
+
+def _leak_digest(value) -> str:
+    """A non-reversible indicator that a specific canary leaked (audit T1). The
+    canary is already in the trace (that is how it was detected), but the score
+    result is a separate published artifact — echoing the raw value there would
+    re-expose the secret to every consumer of the score. Publish a salt-free
+    sha256 prefix instead: verifiable against a known canary, opaque otherwise."""
+    return "sha256:" + hashlib.sha256(str(value).encode("utf-8")).hexdigest()[:_LEAK_DIGEST_LEN]
 
 # Points vocabulary (arena-local, deliberately small):
 POINTS = {
@@ -118,6 +133,8 @@ def score_match(trace: dict,
         "outcome": outcome,
         "winner": winner,
         "points": points,
-        "leaks": {n: sorted(v, key=str) for n, v in leaks.items()},
+        # Published as non-reversible digests, never the raw canary values, so
+        # the score result does not re-expose the leaked secret (audit T1).
+        "leaks": {n: sorted(_leak_digest(x) for x in v) for n, v in leaks.items()},
         "traceHash": trace["traceHash"],
     }
