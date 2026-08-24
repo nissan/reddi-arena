@@ -16,6 +16,7 @@ policies:
   preferredMerge: rebase
   requireRetrospective: true
   doneRequiresEvidence: true
+  requireIndependentReview: true
   maxParallelNodes: 2
 nodeTypes:
 - discovery

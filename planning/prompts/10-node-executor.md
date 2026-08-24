@@ -65,4 +65,17 @@ The PR description must contain:
 - New graph nodes/edges discovered, if any.
 - Risks and rollback notes where applicable.
 
+## Independent review gate (added 2026-08-24)
+
+Before a PR is reported ready for merge, an INDEPENDENT reviewer — a fresh
+context that did not write the change (e.g. a review subagent or a second
+session) — must examine the full PR diff for correctness, boundary
+violations, and test adequacy. Every finding is either fixed on the branch
+or explicitly rebutted, and the review outcome is posted on the PR thread
+so the record shows review preceded merge. Author verification (suite +
+lints + CI) does not satisfy this gate. Note: GitHub-enforced required
+approvals are not usable while all PRs are authored by the operator's own
+account (GitHub forbids self-approval); the gate is process-enforced here
+until a second reviewing identity exists.
+
 Before final merge, rebase onto the latest default branch and rerun required verification.
