@@ -51,11 +51,26 @@ def declared_redaction(doc: dict) -> dict | None:
     return {"mode": rules.get("mode"), "fields": list(rules["fields"])}
 
 
+def _collect_leaves(v, out: list) -> None:
+    """Every scalar leaf reachable under a declared-secret value. A secret
+    declared as a structured value (a credentials object, a list of keys) hides
+    its actual secrets in its leaves; collecting only the container would let a
+    leaf echoed elsewhere survive the scrub (audit: structured-secret bypass)."""
+    if isinstance(v, (str, int, float)):
+        out.append(str(v))
+    elif isinstance(v, dict):
+        for item in v.values():
+            _collect_leaves(item, out)
+    elif isinstance(v, list):
+        for item in v:
+            _collect_leaves(item, out)
+
+
 def _collect_secret_values(obj, fields: set, out: list) -> None:
     if isinstance(obj, dict):
         for k, v in obj.items():
-            if k in fields and isinstance(v, (str, int, float)):
-                out.append(str(v))
+            if k in fields:
+                _collect_leaves(v, out)
             _collect_secret_values(v, fields, out)
     elif isinstance(obj, list):
         for item in obj:
@@ -92,6 +107,11 @@ def redact_payload(payload: dict, rules: dict | None):
     fields = set(rules["fields"])
     secrets: list = []
     _collect_secret_values(payload, fields, secrets)
+    # Scrub longest-first (ties broken deterministically): replacing a short
+    # secret that is a prefix/substring of a longer one first would bite a chunk
+    # out of the longer secret and leave its tail exposed (audit: order-
+    # dependent scrub leak). De-duplicated so the pass is stable.
+    secrets = sorted({s for s in secrets if s}, key=lambda s: (-len(s), s))
     masked = _mask_fields(copy.deepcopy(payload), fields)
     return _scrub_values(masked, secrets)
 

@@ -59,8 +59,27 @@ stream discipline; sputter/extract turn records.
 
 ## Subsystem 3 — trace projections + providers
 
-Reviewer verdict: FINDINGS (yellow). **Remediation pending** (branch
-`fix/trace-projection-hardening`; shares the structured-outcome tag with E4–E6).
+Reviewer verdict: FINDINGS (yellow). **Remediation status (2026-08-24):**
+
+- **Landed in #65** (structured-outcome PR): T3, T6, T7, T8 — outcome now
+  carried by structured `outcomeKind`/`atFault`/`budgetGateFailed` fields
+  instead of reason-string parsing, and `audit` gained a `declared-envelope-
+  overspent` (`spent > cap`) signal.
+- **Landed in `fix/trace-projection-hardening`** (this PR): T2 (off-roster
+  canary key now ignored, no `IndexError`), T4 (structured/nested secret leaves
+  are collected and scrubbed), T5 (JSON-escaped canaries detected via the
+  escaped form; non-string canaries coerced, no `TypeError`), T9 (scrub
+  longest-first, no overlapping-secret tail).
+- **Still open:** T1 — publishing raw leaked values in the score result
+  conflicts with the documented T-037 contract (which asserts the value is
+  surfaced); needs a design decision, not a silent change. Substring
+  false-positives from competitor-controlled strings are mitigated by canary
+  entropy and already documented as a textual-detection limit. T10 — the
+  single mask+scrub path is already the strictest (fail-closed); honoring an
+  alternate `mode` needs the spec to define one, and mask-spoofing exposes no
+  secret. T11 — `effective_doc` capping omitted-capability providers changes
+  fuel and therefore match outcomes, so it moves to the land-last
+  outcome-changing batch with a BALANCE-REPORT regen. T12 — doc/assert nit.
 
 | id | sev | finding | disposition |
 |---|---|---|---|
@@ -83,8 +102,18 @@ pure.
 
 ## Subsystem 4 — lane/binding/weigh-in (trust chain)
 
-Reviewer verdict: FINDINGS. **Remediation pending** (branch
-`fix/binding-hash-coverage` for L1/L5; L2/L4 are game-rule design decisions).
+Reviewer verdict: FINDINGS. **Remediation status (2026-08-24):**
+
+- **Landed in #67** (`fix/binding-hash-coverage`): L1 (capability hash now
+  covers the egress allowlist, per-policy `(resource, action, effect)`
+  targeting, and the `maxInvocations` cap — every lane-enforced input) and L5
+  (egress/policy-target/cap escape tests added). Independent review found and
+  closed a follow-on blocker (the invocation cap) before merge.
+- **Land-last (outcome-changing) batch:** L2 (draft class-ceiling enforcement =
+  E7) and L4 (lane authorization gating the outcome) are the user-approved
+  game-rule changes — decision recorded, BALANCE-REPORT regen required.
+  L3 (in-match hire bonus keyed on name substring = E6) rides the same batch.
+- **Follow-up:** L6 nit (`HIRE_DEPTH_CAP` sub-hire scope).
 
 | id | sev | finding | disposition |
 |---|---|---|---|
