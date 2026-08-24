@@ -242,6 +242,50 @@ check("L1 binding surface is deterministic and key-order insensitive",
 check("L1 the binding surface does not change the AU weight",
       _w_e1i(_fielded_egress)["soloAU"] == _w_e1i(DEF)["soloAU"]
       and _w_e1i(_swapped_policy)["soloAU"] == _w_e1i(DEF)["soloAU"])
+# L1 (audit review): the per-policy invocation cap is a FOURTH lane-enforced
+# input (core/lane.py invoke -> min of matching allows' maxInvocations). Weigh
+# a tight cap, field a loose one (or delete the cap = unlimited): the hash must
+# move and the lane must flag escaped, or the widening slips past E1I.
+_cap_weighed = _cp.deepcopy(DEF)
+_cap_weighed.setdefault("harness", {}).setdefault("policies", [])
+if not any(str(_p.get("resource", "")).startswith("tool:")
+           for _p in _cap_weighed["harness"]["policies"] if isinstance(_p, dict)):
+    _cap_weighed["harness"]["policies"].append(
+        {"resource": "tool:vaultSeal", "action": "invoke", "effect": "allow",
+         "limits": {"maxInvocations": 24}})
+else:
+    for _p in _cap_weighed["harness"]["policies"]:
+        if isinstance(_p, dict) and str(_p.get("resource", "")).startswith("tool:"):
+            _p.setdefault("limits", {})["maxInvocations"] = 24
+            break
+_cap_loose = _cp.deepcopy(_cap_weighed)
+_cap_gone = _cp.deepcopy(_cap_weighed)
+for _p in _cap_loose["harness"]["policies"]:
+    if isinstance(_p, dict) and (_p.get("limits") or {}).get("maxInvocations") == 24:
+        _p["limits"]["maxInvocations"] = 999999
+        break
+for _p in _cap_gone["harness"]["policies"]:
+    if isinstance(_p, dict) and (_p.get("limits") or {}).get("maxInvocations") == 24:
+        _p["limits"].pop("maxInvocations")
+        break
+check("L1 raising a policy invocation cap alters the hash and escapes",
+      _w_e1i(_cap_weighed)["capabilityHash"] != _w_e1i(_cap_loose)["capabilityHash"]
+      and ExecutionLane(_cap_loose, _w_e1i(_cap_weighed)["capabilityHash"],
+                        _w_e1i(_cap_loose)["capabilityHash"]).escaped)
+check("L1 deleting a policy invocation cap (unlimited) alters the hash and escapes",
+      _w_e1i(_cap_weighed)["capabilityHash"] != _w_e1i(_cap_gone)["capabilityHash"]
+      and ExecutionLane(_cap_gone, _w_e1i(_cap_weighed)["capabilityHash"],
+                        _w_e1i(_cap_gone)["capabilityHash"]).escaped)
+check("L1 the invocation cap is not an AU weight input",
+      _w_e1i(_cap_weighed)["soloAU"] == _w_e1i(_cap_loose)["soloAU"])
+# The projection mirrors the lane's egress read: only string hosts can satisfy
+# `host in allowlist`, so numeric junk carries no enforcement weight and "1"
+# stays distinct from 1 (audit review minor).
+check("L1 egress projection keeps string hosts distinct from numeric look-alikes",
+      _bsurf({"harness": {"runtime": {"network": {"allowlist": ["1"]}}}})
+      != _bsurf({"harness": {"runtime": {"network": {"allowlist": [1]}}}})
+      and _bsurf({"harness": {"runtime": {"network": {"allowlist": [1, 2.0, True]}}}})
+      ["egressAllowlist"] == [])
 
 # T-077 — a capability absent from the weighed hash cannot execute: weigh the
 # honest document, then field a mutated one with a smuggled tool.

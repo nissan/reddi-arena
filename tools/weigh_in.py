@@ -277,16 +277,48 @@ def _m(x) -> dict:
     return x if isinstance(x, dict) else {}
 
 
+def _cap(limits) -> object:
+    """Canonical projection of a policy's maxInvocations cap, mirroring the
+    lane's read (`core/lane.py` invoke: min of the matching allows' caps). None
+    means no cap declared. A finite number is normalized to an int when integral
+    so 24 and 24.0 — which the lane's `used >= cap` cannot tell apart — do not
+    spuriously diverge; bool is captured as its int value (the lane treats True
+    as 1); a non-numeric declared cap is captured verbatim as a tagged string so
+    a swap between two distinct malformed caps is still detected."""
+    if not isinstance(limits, dict):
+        return None
+    v = limits.get("maxInvocations")
+    if v is None:
+        return None
+    if isinstance(v, bool):
+        return int(v)
+    if isinstance(v, int):
+        return v
+    if isinstance(v, float) and math.isfinite(v):
+        return int(v) if v.is_integer() else v
+    return f"raw:{v!r}"
+
+
 def binding_surface(doc: dict) -> dict:
-    """Canonical projection of the harness surface the ExecutionLane enforces
-    but the AU formula does not price (audit L1). Two documents that weigh
-    identically but differ in egress allowlist or policy targeting produce
-    different binding surfaces, so their capability hashes differ and E1I
-    detects the swap. Deterministic: sorted, hashable-coerced, no clock."""
+    """Canonical projection of the harness surface the ExecutionLane ENFORCES
+    but the AU formula does not price (audit L1/L5). Two documents that weigh
+    identically but differ in the egress allowlist, per-policy targeting, or the
+    per-policy invocation cap produce different binding surfaces, so their
+    capability hashes differ and E1I detects the swap. The three fields mirror
+    the lane's three enforced inputs: `request_egress` literal membership,
+    `_matching` (resource, action, effect) selection, and the `maxInvocations`
+    cap. Deterministic: sorted, hashable-coerced, no clock.
+
+    Egress: only genuine string entries are projected — `request_egress(host)`
+    tests `host in allowlist` with a string host, so a non-string allowlist
+    entry can never match and carries no enforcement weight; projecting strings
+    only mirrors the lane exactly and keeps `"1"` distinct from `1`.
+    denyByDefault is folded in defensively (a declared-posture change), though
+    the current lane refuses purely on membership."""
     harness = _m(doc.get("harness"))
     network = _m(_m(harness.get("runtime")).get("network"))
-    egress = sorted(str(h) for h in _lst(network.get("allowlist"))
-                    if isinstance(h, (str, int, float)) and not isinstance(h, bool))
+    egress = sorted(h for h in _lst(network.get("allowlist"))
+                    if isinstance(h, str))
     policies = []
     for p in _lst(harness.get("policies")):
         if not isinstance(p, dict):
@@ -295,10 +327,14 @@ def binding_surface(doc: dict) -> dict:
             "resource": _key(p.get("resource"), ""),
             "action": _key(p.get("action"), ""),
             "effect": _key(p.get("effect"), ""),
+            "maxInvocations": _cap(p.get("limits")),
         })
     # Sort policies canonically so key order in the document never changes the
-    # surface, only the actual (resource, action, effect) triples do.
-    policies.sort(key=lambda x: (x["resource"], x["action"], x["effect"]))
+    # surface, only the actual (resource, action, effect, cap) tuples do. The
+    # cap is stringified in the sort key because it may be int, float or str and
+    # Python 3 refuses to order mixed types.
+    policies.sort(key=lambda x: (x["resource"], x["action"], x["effect"],
+                                 str(x["maxInvocations"])))
     return {
         "egressAllowlist": egress,
         "egressDenyByDefault": bool(network.get("denyByDefault")),
