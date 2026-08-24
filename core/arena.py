@@ -27,6 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from weigh_in import weigh, classify, CLASSES  # noqa: E402
 from lane import ExecutionLane, find_tool  # noqa: E402
+from lifecycle import MatchLifecycle  # noqa: E402
 
 ARENA_RAIL = "x402-dry-run"
 ARENA_CURRENCY = "ARENA-CREDIT"
@@ -172,16 +173,36 @@ def evaluate_hire(competitor_doc: dict, merc_doc: dict, entered_class: str) -> D
 # A hired source-auditor grants a defense bonus (it catches untrusted-source
 # citation traps), modelling the real capability the mercenary declares.
 
-def _strategy(doc: dict) -> dict:
+def _read_strategy(doc: dict) -> tuple[dict | None, str | None]:
+    """Fault-checked read of the declared play profile (B2 / T-024).
+
+    ARENA-PROFILE-v0.1 declares strategy as {attack: 0-100, defense: 0-100}.
+    A declaration the engine cannot read (non-numeric) or one outside the
+    declared domain is the deterministic analogue of a crashed or hung
+    competitor: it resolves to a defined forfeit before the first turn
+    instead of an exception hanging the match."""
     xa = (doc.get("extensions") or {}).get("x-arena") or {}
     strat = xa.get("strategy") or {}
-    return {"attack": int(strat.get("attack", 50)), "defense": int(strat.get("defense", 50))}
+    try:
+        attack = int(strat.get("attack", 50))
+        defense = int(strat.get("defense", 50))
+    except (TypeError, ValueError):
+        return None, "unreadable strategy declaration (non-numeric attack/defense)"
+    if not (0 <= attack <= 100 and 0 <= defense <= 100):
+        return None, (f"strategy outside the declared 0-100 domain "
+                      f"(attack={attack}, defense={defense})")
+    return {"attack": attack, "defense": defense}, None
 
 
-def _fuel_cap(doc: dict) -> int:
+def _read_fuel(doc: dict) -> tuple[int, str | None]:
+    """Fault-checked fuel cap. Antweight fuel model: contextWindow tokens are
+    the cap, minimum 2000. An unreadable declaration is a competitor fault."""
     reqs = (doc.get("model") or {}).get("requirements") or {}
-    # Antweight fuel model: contextWindow tokens are the cap, minimum 2000.
-    return max(int(reqs.get("contextWindow", 8000)), 2000)
+    try:
+        cw = int(reqs.get("contextWindow", 8000))
+    except (TypeError, ValueError):
+        return 0, "unreadable fuel declaration (non-numeric contextWindow)"
+    return max(cw, 2000), None
 
 
 @dataclass
@@ -204,8 +225,13 @@ def run_vault_match(bot_a: dict, bot_b: dict, seed: int = 0,
     an identical result and trace. This is the substrate the replay renders.
     """
     names = [bot_a["metadata"]["name"], bot_b["metadata"]["name"]]
-    strat = [_strategy(bot_a), _strategy(bot_b)]
-    fuel = [_fuel_cap(bot_a), _fuel_cap(bot_b)]
+
+    # B2: the lifecycle state machine is the spine of the match. Every match
+    # walks scheduled -> weighing -> binding -> (in-progress ->) terminal, and
+    # only transitions in lifecycle.LEGAL exist — an undefined path raises
+    # instead of producing a trace, so every trace records a legal path.
+    lc = MatchLifecycle()
+    lc.advance("weighing", "computing weigh-in certificates for both competitors")
 
     # B1: every capability use in the match routes through each bot's bounded
     # execution lane — declared, policy-matched, locally bound, or refused.
@@ -220,19 +246,48 @@ def run_vault_match(bot_a: dict, bot_b: dict, seed: int = 0,
     live_certs = [weigh(bot_a), weigh(bot_b)]
     bound_certs = [cert_a or live_certs[0], cert_b or live_certs[1]]
     bound_hashes = [c["capabilityHash"] for c in bound_certs]
+    lc.advance("binding", "binding execution lanes to the weighed capability hashes")
     lanes = [ExecutionLane(bot_a, bound_hashes[0], live_certs[0]["capabilityHash"]),
              ExecutionLane(bot_b, bound_hashes[1], live_certs[1]["capabilityHash"])]
+
+    # B2 / T-024: competitor faults (unreadable or out-of-domain declarations
+    # — the deterministic analogue of crash and hang) are read fault-checked
+    # here so they resolve at binding as defined outcomes, never exceptions.
+    strat_read = [_read_strategy(bot_a), _read_strategy(bot_b)]
+    fuel_read = [_read_fuel(bot_a), _read_fuel(bot_b)]
+    strat = [s for s, _ in strat_read]
+    fuel = [f for f, _ in fuel_read]
+    faults = [strat_read[i][1] or fuel_read[i][1] for i in range(2)]
+
     if lanes[0].escaped or lanes[1].escaped:
         if lanes[0].escaped and lanes[1].escaped:
             winner, reason = -1, ("both fielded documents differ from their "
                                   "weighed certificates; match void")
+            lc.advance("void", reason)
         else:
             escapee = 0 if lanes[0].escaped else 1
             winner = 1 - escapee
             reason = (f"{names[escapee]} forfeits: fielded document does not "
                       f"match its weighed certificate (binding escape)")
+            lc.advance("forfeit", reason)
         return _finalize(names, [], winner, reason, [True, True], fuel,
-                         list(fuel), seed, lanes, bound_hashes)
+                         list(fuel), seed, lanes, bound_hashes, lc)
+
+    if faults[0] or faults[1]:
+        if faults[0] and faults[1]:
+            winner = -1
+            reason = (f"both competitors scratched — {names[0]}: {faults[0]}; "
+                      f"{names[1]}: {faults[1]}; match void")
+            lc.advance("void", reason)
+        else:
+            faulty = 0 if faults[0] else 1
+            winner = 1 - faulty
+            reason = f"{names[faulty]} forfeits before turn 1: {faults[faulty]}"
+            lc.advance("forfeit", reason)
+        return _finalize(names, [], winner, reason, [True, True], fuel,
+                         list(fuel), seed, lanes, bound_hashes, lc)
+
+    lc.advance("in-progress", "binding and declarations verified; turn loop opened")
     probe_tool = [find_tool(bot_a, "probe"), find_tool(bot_b, "probe")]
     seal_tool = [find_tool(bot_a, "seal"), find_tool(bot_b, "seal")]
 
@@ -271,7 +326,8 @@ def run_vault_match(bot_a: dict, bot_b: dict, seed: int = 0,
             turns.append(Turn(n, names[attacker], "sputter", 0, 0, 0, "held"))
             winner = defender
             reason = f"{names[attacker]} ran out of fuel (sputter)"
-            return _finalize(names, turns, winner, reason, secret_held, fuel, fuel_left, seed, lanes, bound_hashes)
+            lc.advance("forfeit", reason)
+            return _finalize(names, turns, winner, reason, secret_held, fuel, fuel_left, seed, lanes, bound_hashes, lc)
 
         probe = strat[attacker]["attack"] + nxt(20) - 10
         defense = strat[defender]["defense"] + defense_bonus[defender] + nxt(20) - 10
@@ -286,7 +342,8 @@ def run_vault_match(bot_a: dict, bot_b: dict, seed: int = 0,
             turns.append(Turn(n, names[attacker], "extract", probe, defense, turn_fuel, "extracted"))
             winner = attacker
             reason = f"{names[attacker]} extracted {names[defender]}'s secret on turn {n}"
-            return _finalize(names, turns, winner, reason, secret_held, fuel, fuel_left, seed, lanes, bound_hashes)
+            lc.advance("decided", reason)
+            return _finalize(names, turns, winner, reason, secret_held, fuel, fuel_left, seed, lanes, bound_hashes, lc)
 
         if seal_tool[defender]:
             lanes[defender].invoke(seal_tool[defender])
@@ -296,14 +353,16 @@ def run_vault_match(bot_a: dict, bot_b: dict, seed: int = 0,
     if fuel_left[0] != fuel_left[1]:
         winner = 0 if fuel_left[0] > fuel_left[1] else 1
         reason = f"turn limit; {names[winner]} won on fuel efficiency"
+        lc.advance("decided", reason)
     else:
         winner = -1
         reason = "turn limit; both secrets held; draw"
-    return _finalize(names, turns, winner, reason, secret_held, fuel, fuel_left, seed, lanes, bound_hashes)
+        lc.advance("draw", reason)
+    return _finalize(names, turns, winner, reason, secret_held, fuel, fuel_left, seed, lanes, bound_hashes, lc)
 
 
 def _finalize(names, turns, winner, reason, secret_held, fuel, fuel_left, seed,
-              lanes=None, bound_hashes=None) -> dict:
+              lanes=None, bound_hashes=None, lifecycle=None) -> dict:
     trace = {
         "format": "vault",
         "seed": seed,
@@ -324,6 +383,11 @@ def _finalize(names, turns, winner, reason, secret_held, fuel, fuel_left, seed,
         # E1I / T-079: every trace records the exact hash each lane was bound
         # to, so a trace is auditable against its weigh-in certificates.
         trace["boundHash"] = {names[i]: bound_hashes[i] for i in range(2)}
+    if lifecycle is not None:
+        # B2 / T-023: the trace carries the full lifecycle path, hash-covered,
+        # and no non-terminal trace can be produced.
+        assert lifecycle.terminal, "match finalized in a non-terminal state"
+        trace["lifecycle"] = lifecycle.snapshot()
     trace["traceHash"] = _hash({k: v for k, v in trace.items() if k != "traceHash"})
     return trace
 

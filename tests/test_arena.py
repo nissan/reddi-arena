@@ -187,6 +187,104 @@ _both = run_vault_match(_smuggled, _cp.deepcopy(RAID), seed=2,
 check("T-078 both escaping voids the match as a draw",
       _both["winner"] is None and "void" in _both["reason"])
 
+print("turn loop and match lifecycle (B2: T-023 T-024 T-025)")
+from core.lifecycle import MatchLifecycle, IllegalTransition, LEGAL, TERMINAL
+
+# T-023 — every match reaches exactly one defined terminal state. Property
+# sweep over seeds plus the forfeit/void shapes produced above.
+_t23_ok = True
+_t23_traces = [run_vault_match(DEF, RAID, seed=_s) for _s in range(20)]
+_t23_traces += [_forfeit, _both]
+for _t in _t23_traces:
+    _life = _t["lifecycle"]
+    _terminals = [h["to"] for h in _life["history"] if h["to"] in TERMINAL]
+    _t23_ok = (_t23_ok and _life["terminal"] and _life["state"] in TERMINAL
+               and len(_terminals) == 1 and _terminals[0] == _life["state"]
+               and _life["history"][-1]["to"] == _life["state"])
+check("T-023 seed sweep + forfeit shapes: exactly one defined terminal state each",
+      _t23_ok)
+check("T-023 decisive path is scheduled->weighing->binding->in-progress->decided",
+      [h["to"] for h in run_vault_match(DEF, RAID, seed=3)["lifecycle"]["history"]]
+      == ["weighing", "binding", "in-progress", "decided"])
+check("T-023 outcome consistency: decided/forfeit name a winner, draw/void do not",
+      all((_t["lifecycle"]["state"] in ("decided", "forfeit"))
+          == (_t["winner"] is not None) for _t in _t23_traces))
+
+# T-024 — crashed or hung competitors forfeit as a defined outcome instead of
+# hanging the match. In the deterministic engine the fault analogues are a
+# declaration the engine cannot read (crash) and one outside the declared
+# 0-100 strategy domain of ARENA-PROFILE-v0.1 (runaway/hang).
+_crash = _cp.deepcopy(DEF)
+_crash["extensions"]["x-arena"]["strategy"]["attack"] = "lots"
+_t24 = run_vault_match(_crash, RAID, seed=2)
+check("T-024 unreadable strategy forfeits before turn 1, no exception",
+      _t24["lifecycle"]["state"] == "forfeit" and _t24["turns"] == []
+      and _t24["winner"] == RAID["metadata"]["name"]
+      and "unreadable strategy" in _t24["reason"])
+_hang = _cp.deepcopy(RAID)
+_hang["extensions"]["x-arena"]["strategy"]["defense"] = 5000
+_t24b = run_vault_match(DEF, _hang, seed=2)
+check("T-024 out-of-domain strategy forfeits as a defined outcome",
+      _t24b["lifecycle"]["state"] == "forfeit"
+      and _t24b["winner"] == DEF["metadata"]["name"]
+      and "0-100 domain" in _t24b["reason"])
+_nofuel = _cp.deepcopy(RAID)
+_nofuel["model"]["requirements"]["contextWindow"] = "unbounded"
+check("T-024 unreadable fuel declaration forfeits as a defined outcome",
+      "unreadable fuel" in run_vault_match(DEF, _nofuel, seed=2)["reason"])
+check("T-024 both competitors faulty voids the match",
+      run_vault_match(_crash, _hang, seed=2)["lifecycle"]["state"] == "void")
+check("T-024 fault forfeits are deterministic",
+      run_vault_match(_crash, RAID, seed=2)["traceHash"] == _t24["traceHash"])
+
+# T-025 — illegal lifecycle transitions are unreachable: exhaustive sweep of
+# every (state, target) pair, reaching each state only via legal walks.
+_paths = {
+    "scheduled": [], "weighing": ["weighing"],
+    "binding": ["weighing", "binding"],
+    "in-progress": ["weighing", "binding", "in-progress"],
+    "decided": ["weighing", "binding", "in-progress", "decided"],
+    "forfeit": ["weighing", "binding", "forfeit"],
+    "draw": ["weighing", "binding", "in-progress", "draw"],
+    "void": ["weighing", "binding", "void"],
+}
+
+def _walked_to(state):
+    m = MatchLifecycle()
+    for s in _paths[state]:
+        m.advance(s, "walk")
+    return m
+
+_t25_ok = True
+for _frm in _paths:
+    for _to in list(LEGAL) + ["no-such-state"]:
+        _m = _walked_to(_frm)
+        try:
+            _m.advance(_to, "probe")
+            _allowed = True
+        except IllegalTransition:
+            _allowed = False
+        _t25_ok = _t25_ok and _allowed == (_to in LEGAL.get(_frm, frozenset()))
+check("T-025 exhaustive sweep: advance succeeds iff the transition is legal",
+      _t25_ok)
+check("T-025 terminal states are absorbing (no legal exits)",
+      all(not LEGAL[s] for s in TERMINAL))
+def _raises_illegal(machine, to):
+    try:
+        machine.advance(to, "probe")
+        return False
+    except IllegalTransition:
+        return True
+
+check("T-025 phase skipping is unreachable (scheduled -> in-progress raises)",
+      _raises_illegal(MatchLifecycle(), "in-progress"))
+check("T-025 unknown states are unreachable",
+      _raises_illegal(_walked_to("binding"), "sudden-death"))
+check("T-025 history records the exact walked path append-only",
+      [h["to"] for h in _walked_to("decided").history]
+      == _paths["decided"]
+      and _walked_to("decided").history[0]["from"] == "scheduled")
+
 print("anti-gaming review (A6: T-013 T-014)")
 import copy as _cp
 from weigh_in import weigh as _weigh
