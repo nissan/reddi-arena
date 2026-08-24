@@ -40,6 +40,10 @@ _BOOL_REQS = ("toolCalling", "structuredOutput")
 _NUM_REQS = ("contextWindow", "maxOutputTokens")
 
 
+def _is_num(x) -> bool:
+    return isinstance(x, (int, float)) and not isinstance(x, bool)
+
+
 def declared_order(doc: dict) -> list[str]:
     """The declared preference order, preferred first, deduplicated."""
     providers = (doc.get("model") or {}).get("providers") or {}
@@ -61,7 +65,10 @@ def _missing_requirements(requirements: dict, capabilities: dict) -> list[str]:
         declared = requirements.get(req)
         if declared is not None:
             offered = capabilities.get(req)
-            if offered is None or offered < declared:
+            # A non-numeric offered value is treated as unmet, not compared with
+            # `<` (which would raise TypeError on e.g. a string) — this mirrors
+            # effective_doc capping such a value to 0 (audit T11 consistency).
+            if not _is_num(offered) or offered < declared:
                 missing.append(req)
     declared_modes = set(requirements.get("modalities") or [])
     if declared_modes and not declared_modes <= set(capabilities.get("modalities") or []):
@@ -105,10 +112,6 @@ def select_provider(doc: dict, available: dict) -> dict:
                 "considered": considered}
     return {"provider": None, "status": "unavailable", "missing": [],
             "considered": considered}
-
-
-def _is_num(x) -> bool:
-    return isinstance(x, (int, float)) and not isinstance(x, bool)
 
 
 def effective_doc(doc: dict, capabilities: dict) -> dict:

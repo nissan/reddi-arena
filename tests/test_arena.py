@@ -715,6 +715,15 @@ from arena import _read_fuel as _rf_t11
 check("T11 an omitted capability floors effective fuel, surfacing divergence",
       _rf_t11(effective_doc(DEF, {}))[0] == 2000
       and _rf_t11(effective_doc(DEF, {"contextWindow": 200000}))[0] == 8000)
+# select_provider must mark a non-numeric offered capability degraded, mirroring
+# effective_doc capping it to 0 — the old `offered < declared` raised TypeError
+# on e.g. a string (audit T11 consistency).
+_t11_nonnum = {"anthropic": {"credentials": True, "capabilities": {
+    "toolCalling": True, "structuredOutput": True,
+    "contextWindow": "lots", "maxOutputTokens": 8192, "modalities": ["text"]}}}
+check("T11 select_provider degrades a non-numeric offered capability, no TypeError",
+      select_provider(DEF, _t11_nonnum)["status"] == "degraded"
+      and "contextWindow" in select_provider(DEF, _t11_nonnum)["missing"])
 
 # T-028 — cross-provider divergence is measured and published, not hidden.
 _rep = divergence_report(DEF, RAID, _AVAIL, range(10))
