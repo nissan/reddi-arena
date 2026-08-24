@@ -81,6 +81,8 @@ The competition arena and the power-up market are **built and running**, CLI and
 web, on the honest dry-run lane. Start here:
 
 - **`QUICKSTART.md`** — run the CLI or the web app in one command.
+- **`docs/OPERATIONS.md`** — operator runbook for the deployed preview:
+  waitlist admin endpoints, signup email, env vars, deploy gotchas.
 - **`tutorials/vault-duel.md`** — the guided first match (learning-path capstone).
 - **`findings/F-007-price-field-intake.md`** — the spec finding filed in parallel
   so the power-up market can become a true priced marketplace at ADL v0.3.
@@ -116,6 +118,7 @@ findings. The plan documents are retained as design, not as work.
 | `docs/ROADMAP.md` | Projection: phases, swimlanes, epics, mermaid dependency graph |
 | `docs/BACKLOG.md` | Projection: issues, tasks, acceptance criteria, boundaries |
 | `docs/TEST-PLAN.md` | Projection: 95 automated doneness tests and phase exit gates |
+| `docs/OPERATIONS.md` | Operator runbook: waitlist admin, signup email, env vars, deploys |
 | `docs/ANALYST-REVIEW-BRIEF.md` | Adversarial review brief for an independent pass |
 | `tools/weigh_in.py` | Deterministic weigh-in and capability hash |
 | `tools/plan_lint.py` | Plan invariant checker (L1–L7) |
