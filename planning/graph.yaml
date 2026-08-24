@@ -392,7 +392,7 @@ nodes:
 - id: B2
   type: implementation
   title: Implement the turn loop and match lifecycle
-  status: ready
+  status: done
   objective: Deterministic lifecycle is the precondition for replayable evidence.
   epic: E04
   lane: SL-B
@@ -419,6 +419,15 @@ nodes:
     - test-output
     - pr-review
     - spdd artifact (spdd/prompt/*-b2-*.md) Sync Log updated
+    recorded:
+    - 'PR #54 (merged 2026-08-24, closes #10): T-023/T-024/T-025 implemented —
+      core/lifecycle.py closed state machine (advance() raises IllegalTransition,
+      terminal states absorbing), arena walks scheduled->weighing->binding->
+      (in-progress->)terminal, competitor faults (unreadable/out-of-domain
+      declarations) forfeit pre-turn as defined outcomes, trace carries
+      hash-covered lifecycle path; suite 125->138 for the node, re-verified
+      green through the PR #53 rebase (final suite 141); Sync Log records the
+      staleness re-scope in-PR.'
   boundary: Lifecycle events are evidence, not adjudication.
   surfaces:
     allow: *id002
