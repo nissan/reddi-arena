@@ -437,7 +437,7 @@ nodes:
 - id: B3
   type: implementation
   title: Provider abstraction across declared model providers
-  status: ready
+  status: done
   objective: Provider neutrality is an ADL promise; the Arena is where it either holds or
     visibly breaks.
   epic: E04
@@ -465,6 +465,16 @@ nodes:
     - test-output
     - pr-review
     - spdd artifact (spdd/prompt/*-b3-*.md) Sync Log updated
+    recorded:
+    - 'PR #55 (merged 2026-08-24, closes #11): T-026/T-027/T-028 implemented —
+      core/providers.py pure fail-closed selection over the declared order
+      (undeclared providers invisible, missing credentials skip with recorded
+      reason, requirement gaps report degraded never silent success),
+      divergence measured via the effective-fuel channel and published
+      (divergence_report + tools/provider_divergence.py ->
+      docs/PROVIDER-DIVERGENCE-REPORT.md); fixtures/providers.yaml simulated
+      table; suite 141->153; Sync Log records the deterministic re-scope
+      (live cross-provider e2e stays in the approval-gated lane).'
   boundary: Declaring a provider is not credential authorization. Missing credentials fail
     closed rather than silently falling back.
   surfaces:
