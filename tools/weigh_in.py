@@ -109,12 +109,17 @@ def _key(x, default: str) -> str:
 
 
 def _tier(value: Any, divisor: int, per: int) -> int:
-    # inf/nan are floats but not real declarations — int(ceil(inf)) overflows
-    # (audit finding, non-finite bypass). Treat them as unreadable -> 0.
-    if not isinstance(value, (int, float)) or isinstance(value, bool) \
-            or not math.isfinite(value):
+    # bool is not a declaration; inf/nan overflow int(ceil()). For a huge int,
+    # float division would overflow to inf too — so use EXACT integer ceil
+    # division for ints (also removes a latent float-rounding path). Matches
+    # math.ceil(value/divisor) for every well-formed value.
+    if isinstance(value, bool):
         return 0
-    return int(math.ceil(value / divisor)) * per
+    if isinstance(value, int):
+        return (-(-value // divisor)) * per
+    if isinstance(value, float) and math.isfinite(value):
+        return int(math.ceil(value / divisor)) * per
+    return 0
 
 
 def _referenced_policy_ids(harness: dict) -> set[str]:
@@ -346,17 +351,30 @@ def weigh(doc: dict, hires: list[dict] | None = None) -> dict:
     solo_au = sum(au for _, au in lines)
 
     hire_lines: list[tuple[str, int]] = []
-    for hire in hires or []:
-        merc_au = hire["au"]
-        coupled = int(math.ceil(merc_au * COUPLING_FACTOR)) + ENGAGEMENT_OVERHEAD_AU
-        hire_lines.append((f"hire.{hire['name']}", coupled))
+    for hire in _lst(hires):
+        merc_au = _m(hire).get("au")
+        if not isinstance(merc_au, int) or isinstance(merc_au, bool):
+            merc_au = 0
+        # ceil(merc_au * 0.6) as EXACT integer math — merc_au * 0.6 (float)
+        # overflows for a huge malformed AU (audit re-review). COUPLING_FACTOR
+        # is 0.6 = 6/10.
+        coupled = -(-(merc_au * 6) // 10) + ENGAGEMENT_OVERHEAD_AU
+        hire_lines.append((f"hire.{_m(hire).get('name')}", coupled))
 
     fielded_au = solo_au + sum(au for _, au in hire_lines)
 
+    # These two raw fields flow into the JSON-canonical capability hash, so a
+    # non-serializable value (bytes/set) would crash json.dumps (audit
+    # re-review M1). Coerce to a serializable scalar; the tierVerdict below
+    # already handles the requestedLevel semantics separately.
+    _agent = _m(doc.get("metadata")).get("name")
+    _req_level = _m(doc.get("conformance")).get("requestedLevel")
     certificate = {
         "weightsVersion": WEIGHTS_VERSION,
-        "agent": _m(doc.get("metadata")).get("name"),
-        "requestedConformanceLevel": _m(doc.get("conformance")).get("requestedLevel"),
+        "agent": _agent if isinstance(_agent, str) else None,
+        "requestedConformanceLevel": _req_level
+            if isinstance(_req_level, (str, int, float)) and not isinstance(_req_level, bool)
+            else None,
         "soloAU": solo_au,
         "soloClass": classify(solo_au),
         "fieldedAU": fielded_au,

@@ -333,7 +333,8 @@ check("fault-hardening: curated malformed declarations resolve to a terminal tra
 # the reviewer flagged — non-dict, non-list, unhashable, non-finite, non-str
 # name — not just the curated shapes above.
 _BAD_VALUES = [None, 3.5, "x", [1, 2], {"k": 1}, True, float("inf"),
-               float("nan"), [[1]], "999999"]
+               float("nan"), [[1]], "999999",
+               int("9" * 400), b"bytes", {1, 2}]  # huge int / non-serializable
 _PATHS = [
     ("metadata",), ("metadata", "name"), ("model",), ("model", "requirements"),
     ("model", "requirements", "contextWindow"),
@@ -358,19 +359,43 @@ def _set_path(doc, path, value):
     if isinstance(cur, dict):
         cur[path[-1]] = value
 
+from weigh_in import weigh as _w_fuzz
 _fuzz_crashes = []
+_fuzz_n = 0
 for _path in _PATHS:
     for _val in _BAD_VALUES:
         _d = _cp.deepcopy(DEF)
         _set_path(_d, _path, _val)
-        try:
-            _t = run_vault_match(_d, RAID, seed=2)
-            if not (_t["lifecycle"]["terminal"] and _t["traceHash"].startswith("sha256:")):
-                _fuzz_crashes.append((_path, type(_val).__name__, "non-terminal"))
-        except Exception as _e:
-            _fuzz_crashes.append((_path, type(_val).__name__, type(_e).__name__))
-check(f"fault-hardening: typed-fuzz sweep — every nested bad value resolves, never crashes "
-      f"({len(_PATHS) * len(_BAD_VALUES)} cases)",
+        _fuzz_n += 1
+        # Exercise both the match engine AND weigh() directly (the hash path
+        # the certificate flows through), single-side and self-match.
+        for _call in (lambda: run_vault_match(_d, RAID, seed=2),
+                      lambda: run_vault_match(_cp.deepcopy(_d), _cp.deepcopy(_d), seed=1),
+                      lambda: _w_fuzz(_d)):
+            try:
+                _r = _call()
+                if isinstance(_r, dict) and "lifecycle" in _r \
+                        and not _r["lifecycle"]["terminal"]:
+                    _fuzz_crashes.append((_path, type(_val).__name__, "non-terminal"))
+            except Exception as _e:
+                _fuzz_crashes.append((_path, type(_val).__name__, type(_e).__name__))
+# Item-field injection: a bad value INSIDE a tool/policy/source/intent item
+# (the value class the reviewer flagged — an unhashable tool id, etc.).
+for _coll, _field in [("tools", "id"), ("tools", "sideEffects"),
+                      ("policies", "resource"), ("policies", "id"),
+                      ("dataSources", "type"), ("functions", "id")]:
+    for _val in _BAD_VALUES:
+        _d = _cp.deepcopy(DEF)
+        _d.setdefault("harness", {})[_coll] = [{_field: _val}]
+        _fuzz_n += 1
+        for _call in (lambda: run_vault_match(_d, RAID, seed=2), lambda: _w_fuzz(_d)):
+            try:
+                _call()
+            except Exception as _e:
+                _fuzz_crashes.append((f"{_coll}[].{_field}", type(_val).__name__,
+                                      type(_e).__name__))
+check(f"fault-hardening: typed-fuzz sweep — nested + item-field bad values resolve, "
+      f"never crash ({_fuzz_n} shapes over match+weigh+self-match)",
       not _fuzz_crashes)
 # A malformed hire document must not crash the match either (audit minor 4).
 check("fault-hardening: a malformed hire document does not crash the match",

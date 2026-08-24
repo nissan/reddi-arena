@@ -195,11 +195,16 @@ def _dig(doc, *keys):
 
 
 def _is_number(x) -> bool:
-    # bool is an int subclass but is never a valid numeric declaration here;
-    # inf/nan are floats but overflow int() — treat as unreadable.
+    # bool is an int subclass but is never a valid numeric declaration here.
+    # A Python int is arbitrary-precision and always usable (int()/comparisons
+    # never overflow); calling math.isfinite() on a huge int would itself raise
+    # OverflowError, so ints skip that check. Only floats need the inf/nan test.
     import math
-    return (isinstance(x, (int, float)) and not isinstance(x, bool)
-            and math.isfinite(x))
+    if isinstance(x, bool):
+        return False
+    if isinstance(x, int):
+        return True
+    return isinstance(x, float) and math.isfinite(x)
 
 
 def _read_strategy(doc: dict) -> tuple[dict | None, str | None]:
@@ -277,6 +282,13 @@ def run_vault_match(bot_a: dict, bot_b: dict, seed: int = 0,
     Deterministic Vault match. Given identical inputs and seed, always returns
     an identical result and trace. This is the substrate the replay renders.
     """
+    # M2 (audit re-review): a top-level non-mapping document — including the
+    # None that yaml.safe_load returns for an empty file — is coerced to an
+    # empty dict here so the whole match resolves as a fault forfeit rather
+    # than an AttributeError constructing the lane.
+    bot_a = bot_a if isinstance(bot_a, dict) else {}
+    bot_b = bot_b if isinstance(bot_b, dict) else {}
+
     # E9: names are read defensively; a missing name is a fault resolved as a
     # forfeit below, never a KeyError mid-setup. Slot placeholders keep the
     # trace well-formed even when a name is absent.

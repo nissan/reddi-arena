@@ -39,8 +39,14 @@ class ExecutionLane:
         _name = _m(doc.get("metadata")).get("name")
         self.subject = "agent:" + (_name if isinstance(_name, str) and _name else "unknown")
         harness = _m(doc.get("harness"))
-        self.tools = {t.get("id"): t for t in _lst(harness.get("tools"))
-                      if isinstance(t, dict)}
+        # A tool id is used as a dict key, so it must be hashable: a list/dict
+        # id would raise 'unhashable type'. Skip tools whose id is not a
+        # str/number (audit re-review C2).
+        def _hashable_id(t):
+            tid = t.get("id")
+            return tid if isinstance(tid, (str, int, float)) and not isinstance(tid, bool) else None
+        self.tools = {_hashable_id(t): t for t in _lst(harness.get("tools"))
+                      if isinstance(t, dict) and _hashable_id(t) is not None}
         self.policies = [p for p in _lst(harness.get("policies")) if isinstance(p, dict)]
         network = _m(_m(harness.get("runtime")).get("network"))
         self.egress_allowlist = list(_lst(network.get("allowlist")))
