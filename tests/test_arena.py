@@ -353,6 +353,80 @@ check("T-028 outcome divergence is detected and listed when it occurs",
 check("T-028 divergence report is deterministic",
       divergence_report(DEF, RAID, _AVAIL, range(10)) == _rep)
 
+print("token fuel accounting (B4: T-029 T-030 T-031)")
+from core.fuel import (
+    FuelMeter, budget_gate, TURN_PROMPT_COST, TURN_COMPLETION_COST, TURN_COST,
+)
+
+# T-029 — exceeding the declared fuel cap fails the budget-check gate at the
+# declared thresholds, as a defined pre-turn outcome.
+check("T-029 reference docs pass the budget gate",
+      budget_gate(DEF, 8000)["passed"] and budget_gate(RAID, 8000)["passed"])
+_tiny_out = _cp.deepcopy(DEF)
+_tiny_out["model"]["requirements"]["maxOutputTokens"] = TURN_COMPLETION_COST - 1
+_g = budget_gate(_tiny_out, 8000)
+check("T-029 completion above declared maxOutputTokens fails the gate, threshold named",
+      not _g["passed"] and "maxOutputTokens" in _g["reason"])
+check("T-029 per-turn cost above the fuel cap fails the gate",
+      not budget_gate(DEF, TURN_COST - 1)["passed"])
+_t29 = run_vault_match(_tiny_out, RAID, seed=3)
+check("T-029 failed gate forfeits before turn 1 as a defined outcome",
+      _t29["lifecycle"]["state"] == "forfeit" and _t29["turns"] == []
+      and _t29["winner"] == RAID["metadata"]["name"]
+      and "budget gate" in _t29["reason"])
+check("T-029 both failing the gate voids the match",
+      run_vault_match(_tiny_out, _cp.deepcopy(_tiny_out), seed=3)
+      ["lifecycle"]["state"] == "void")
+
+# T-030 — fuel exhaustion mid-turn produces the defined sputter outcome,
+# never an exception. cap 2090 = 34 full turns + a prompt charge with 10
+# left: the 35th attack charges the prompt, cannot afford the completion.
+_sput = _cp.deepcopy(DEF)
+_sput["extensions"]["x-arena"]["strategy"] = {"attack": 0, "defense": 100}
+_sput["model"]["requirements"]["contextWindow"] = 2090
+_sput_b = _cp.deepcopy(RAID)
+_sput_b["extensions"]["x-arena"]["strategy"] = {"attack": 0, "defense": 100}
+_t30 = run_vault_match(_sput, _sput_b, seed=0, max_turns=200)
+_led30 = _t30["fuelAccounting"][DEF["metadata"]["name"]]
+check("T-030 mid-turn exhaustion sputters as a defined forfeit",
+      _t30["lifecycle"]["state"] == "forfeit"
+      and "sputter-mid" in _t30["reason"]
+      and _t30["winner"] == RAID["metadata"]["name"])
+check("T-030 the partial turn is in the ledger: prompt charged, completion zero",
+      _led30["ledger"][-1]["prompt"] == TURN_PROMPT_COST
+      and _led30["ledger"][-1]["completion"] == 0
+      and _led30["remaining"] == 2090 - _led30["spent"])
+_sput_pre = _cp.deepcopy(_sput)
+_sput_pre["model"]["requirements"]["contextWindow"] = 2040  # 34 exact turns
+_t30p = run_vault_match(_sput_pre, _sput_b, seed=0, max_turns=200)
+check("T-030 pre-turn exhaustion sputters with nothing charged",
+      "sputter-pre" in _t30p["reason"]
+      and _t30p["fuelAccounting"][DEF["metadata"]["name"]]["remaining"] == 0)
+check("T-030 the meter never overdraws",
+      FuelMeter(TURN_PROMPT_COST - 1).charge(1)["outcome"] == "sputter-pre"
+      and FuelMeter(TURN_PROMPT_COST - 1).remaining == TURN_PROMPT_COST - 1)
+
+# T-031 — accounting reconciles exactly with the emitted trace for every
+# match: property sweep over seeds plus the sputter/gate shapes above.
+_t31_ok = True
+_t31_traces = [run_vault_match(DEF, RAID, seed=_s) for _s in range(20)]
+_t31_traces += [_t30, _t30p, _t29]
+for _t in _t31_traces:
+    for _i, _n in enumerate(_t["competitors"]):
+        _fa = _t["fuelAccounting"][_n]
+        _ledger_sum = sum(e["prompt"] + e["completion"] for e in _fa["ledger"])
+        _t31_ok = (_t31_ok
+                   and _fa["spent"] + _fa["remaining"] == _fa["cap"]
+                   and _ledger_sum == _fa["spent"]
+                   and _t["fuelStart"][_i] == _fa["cap"]
+                   and _t["fuelLeft"][_i] == _fa["remaining"]
+                   and _t["fuelStart"][_i] - _t["fuelLeft"][_i] == _ledger_sum)
+check("T-031 ledger, cap, spent, remaining and trace fuel fields all reconcile",
+      _t31_ok)
+check("T-031 fuel accounting is hash-covered and deterministic",
+      run_vault_match(_sput, _sput_b, seed=0, max_turns=200)["traceHash"]
+      == _t30["traceHash"])
+
 print("anti-gaming review (A6: T-013 T-014)")
 import copy as _cp
 from weigh_in import weigh as _weigh
