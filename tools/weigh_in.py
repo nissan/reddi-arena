@@ -112,6 +112,111 @@ def _referenced_policy_ids(harness: dict) -> set[str]:
     return referenced
 
 
+# ---------------------------------------------------------------------------
+# A7: conformance level -> league tier (tests T-015/T-016).
+#
+# This is an ARENA-LOCAL eligibility assessment, not canonical conformance
+# certification — the lab's checker remains the authority on conformance
+# levels (one-way canonicality). The ladder below assesses what a document
+# structurally demonstrates, so tier eligibility can be computed
+# deterministically at weigh-in. Each rung names its requirement; a rung
+# passes only if every lower rung passed.
+#
+# Tier levels mirror core.arena.LEAGUE_TIERS (the suite asserts they stay
+# in sync): purses and hiring require Title (L3); Rookie/Open are
+# glory-only. Reaching a tier grants MATCH ELIGIBILITY only — never
+# provider, network, wallet, or rail access.
+# ---------------------------------------------------------------------------
+TIER_LEVELS = {"rookie": 1, "open": 2, "title": 3}
+
+
+def _l1(doc: dict) -> bool:
+    return bool((doc.get("metadata") or {}).get("name")
+                and doc.get("model")
+                and (doc.get("harness") or {}).get("tools"))
+
+
+def _l2(doc: dict) -> bool:
+    harness = doc.get("harness") or {}
+    tools = harness.get("tools") or []
+    policies = harness.get("policies") or []
+    covered = {p.get("resource") for p in policies}
+    obs = harness.get("observability") or {}
+    return bool(tools and obs.get("events")
+                and all(f"tool:{t.get('id')}" in covered for t in tools))
+
+
+def _l3(doc: dict) -> bool:
+    obs = (doc.get("harness") or {}).get("observability") or {}
+    conf = doc.get("conformance") or {}
+    return bool((obs.get("redaction") or {}).get("fields")
+                and obs.get("retention")
+                and conf.get("evidenceRefs"))
+
+
+LEVEL_LADDER = [
+    (1, "declares metadata.name, a model block, and at least one harness tool", _l1),
+    (2, "every declared tool is policy-covered and observability events are declared", _l2),
+    (3, "declares observability redaction and retention plus conformance evidenceRefs", _l3),
+]
+
+
+def assess_level(doc: dict) -> dict:
+    """Arena-local structural assessment. Achieved level = highest rung with
+    every rung at or below it passing; the first failing rung is named."""
+    achieved = 0
+    failing = None
+    for level, requirement, checkfn in LEVEL_LADDER:
+        if checkfn(doc):
+            achieved = level
+        else:
+            failing = {"level": level, "requirement": requirement}
+            break
+    return {"achievedLevel": achieved, "failingRequirement": failing}
+
+
+def tier_verdict(doc: dict) -> dict:
+    """The verdict recorded in the weigh-in certificate (T-015/T-016).
+
+    A requestedLevel above the achieved level is rejected with the failing
+    requirement named — a bot cannot claim its way into a tier. Otherwise
+    eligibility covers every tier whose required level is met; purse and
+    hiring rights exist only where the tier mapping grants them (Title).
+    """
+    assessment = assess_level(doc)
+    achieved = assessment["achievedLevel"]
+    requested = (doc.get("conformance") or {}).get("requestedLevel")
+    if requested is not None and requested > achieved:
+        failing = assessment["failingRequirement"] or {
+            "level": requested,
+            "requirement": f"level {requested} exceeds the assessment ladder"}
+        return {
+            "status": "rejected",
+            "reason": (f"requestedLevel {requested} exceeds achieved level "
+                       f"{achieved}: L{failing['level']} requires "
+                       f"{failing['requirement']}"),
+            "achievedLevel": achieved,
+            "requestedLevel": requested,
+            "eligibleTiers": [],
+            "highestTier": None,
+            "purse": False,
+            "hiring": False,
+        }
+    eligible = sorted((t for t, lvl in TIER_LEVELS.items() if achieved >= lvl),
+                      key=lambda t: TIER_LEVELS[t])
+    highest = eligible[-1] if eligible else None
+    return {
+        "status": "ok",
+        "reason": f"achieved L{achieved}; eligible: {', '.join(eligible) or 'none'}",
+        "achievedLevel": achieved,
+        "requestedLevel": requested,
+        "eligibleTiers": eligible,
+        "highestTier": highest,
+        "purse": highest == "title",
+        "hiring": highest == "title",
+    }
+
+
 def weigh(doc: dict, hires: list[dict] | None = None) -> dict:
     """Return a full weigh-in certificate for an ADL document."""
     lines: list[tuple[str, int]] = []
@@ -192,6 +297,10 @@ def weigh(doc: dict, hires: list[dict] | None = None) -> dict:
         "fieldedClass": classify(fielded_au),
         "classBumped": classify(solo_au) != classify(fielded_au),
         "breakdown": [{"item": k, "au": v} for k, v in lines + hire_lines],
+        # A7 / T-015: the tier verdict is part of the certificate and is
+        # covered by the capability hash below, so it is auditable and
+        # cannot be swapped after weigh-in.
+        "tierVerdict": tier_verdict(doc),
     }
     canonical = json.dumps(
         {k: v for k, v in certificate.items() if k != "capabilityHash"},

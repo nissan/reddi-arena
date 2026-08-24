@@ -11,9 +11,9 @@ This is the teaching mechanism — players learn the spec by ranking up, not by 
 
 **DoD checklist:**
 
-- [ ] A Level-1 document cannot enter a Title fight or carry a purse
-- [ ] requestedLevel above achieved level is rejected with the failing requirement named
-- [ ] The tier verdict is recorded in the weigh-in certificate
+- [x] A Level-1 document cannot enter a Title fight or carry a purse
+- [x] requestedLevel above achieved level is rejected with the failing requirement named
+- [x] The tier verdict is recorded in the weigh-in certificate
 
 ## E — Entities / Handoff Objects
 
@@ -92,3 +92,4 @@ Reaching a tier grants match eligibility only. It never grants provider, network
 | Date | Divergence | Artifact update | Code/test update |
 |---|---|---|---|
 | 2026-08-05 | Generated from plan/backlog.yaml (ready) | initial | n/a |
+| 2026-08-24 | DISCOVER: LEAGUE_TIERS (rookie L1 / open L2 / title L3, purse+hiring Title-only) existed in core/arena.py but nothing computed an ACHIEVED level or recorded a verdict; the cli defers to a lab conformance bundle that is not vendored. One-way canonicality constrains the design: assess_level() in tools/weigh_in.py is an explicitly ARENA-LOCAL structural eligibility ladder (L1 basics, L2 full policy coverage + observability events, L3 redaction+retention+evidenceRefs), not canonical certification — the lab checker remains the authority. tier_verdict() rejects requestedLevel > achieved with the failing rung named, grants eligibility up to the achieved level, and is embedded in the certificate BEFORE the capability hash so the verdict is hash-covered and unswappable. TIER_LEVELS mirrors LEAGUE_TIERS with a suite check asserting sync. Reference docs assess at L2 (rookie+open, no purse) — consistent with their requestedLevel 1. First node run under the independent-review gate (policy commit e730e70). | this row | tools/weigh_in.py (+assess_level, tier_verdict, TIER_LEVELS, cert field); suite 198→205 (A7 sync ×1, T-015 ×3, T-016 ×3) |

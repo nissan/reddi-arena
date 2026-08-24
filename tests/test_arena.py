@@ -54,6 +54,49 @@ check("refusal shows the AU delta", d_ant.au_delta == 65 and d_ant.fielded_au ==
 d_beetle = evaluate_hire(DEF, MERC, "Beetleweight")
 check("same hire allowed at Beetleweight", d_beetle.allowed)
 
+print("conformance levels to league tiers (A7: T-015 T-016)")
+import copy as _cp_a7
+from weigh_in import weigh as _w_a7, tier_verdict, assess_level, TIER_LEVELS
+from core.arena import LEAGUE_TIERS
+
+check("A7 tier levels stay in sync with core.arena.LEAGUE_TIERS",
+      TIER_LEVELS == {t: cfg["level"] for t, cfg in LEAGUE_TIERS.items()}
+      and all(LEAGUE_TIERS[t]["purse"] == (t == "title") for t in LEAGUE_TIERS))
+
+# T-015 — a Level-1 document cannot enter a Title fight or carry a purse.
+_v_def = _w_a7(DEF)["tierVerdict"]
+check("T-015 reference doc (achieves L2) is not Title-eligible and carries no purse",
+      "title" not in _v_def["eligibleTiers"]
+      and _v_def["purse"] is False and _v_def["hiring"] is False)
+_l1_doc = _cp_a7.deepcopy(DEF)
+_l1_doc["harness"]["policies"] = []
+_v_l1 = tier_verdict(_l1_doc)
+check("T-015 a Level-1 document is Rookie-only",
+      _v_l1["achievedLevel"] == 1 and _v_l1["eligibleTiers"] == ["rookie"]
+      and _v_l1["purse"] is False)
+check("T-015 the tier verdict is recorded in the weigh-in certificate, hash-covered",
+      _w_a7(DEF)["tierVerdict"] == _v_def
+      and _w_a7(DEF)["capabilityHash"] == _w_a7(DEF)["capabilityHash"]
+      and _w_a7(_l1_doc)["capabilityHash"] != _w_a7(DEF)["capabilityHash"])
+
+# T-016 — requestedLevel above achieved level is rejected with the failing
+# requirement named; an honest request passes.
+_over = _cp_a7.deepcopy(DEF)
+_over["conformance"]["requestedLevel"] = 3
+_v_over = tier_verdict(_over)
+check("T-016 over-request rejected with the failing requirement named",
+      _v_over["status"] == "rejected"
+      and "evidenceRefs" in _v_over["reason"]
+      and _v_over["eligibleTiers"] == [])
+check("T-016 an honest request at or below achieved level passes",
+      tier_verdict(DEF)["status"] == "ok"
+      and assess_level(DEF)["achievedLevel"] == 2)
+_full = _cp_a7.deepcopy(DEF)
+_full["conformance"]["evidenceRefs"] = ["trace:arena/vault/match"]
+check("T-016 completing the L3 requirements unlocks Title with purse and hiring",
+      tier_verdict(_full)["highestTier"] == "title"
+      and tier_verdict(_full)["purse"] is True)
+
 print("coupled weight for hires (A5: T-010 T-011 T-012)")
 from core.arena import evaluate_hire_chain, HIRE_DEPTH_CAP
 
