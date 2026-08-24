@@ -997,6 +997,49 @@ check("T-037 both secrets leaking voids the match",
       _sc37b["outcome"] == "void"
       and all(v == 0 for v in _sc37b["points"].values()))
 
+# Audit (T9/T10/T11): trace-projection hardening. The canary/redaction layer
+# is a security boundary — it must not be defeated by JSON escaping, a
+# non-string canary, scrub ordering, or a secret nested under a declared field.
+_esc_canary = 'VAULT"CANARY\\77'  # a quote and a backslash: escaped in the blob
+_esc_leak = _cp.deepcopy(_shapes36["draw"])
+_esc_leak["reason"] = _esc_leak["reason"] + " leaked " + _esc_canary
+check("audit: an escaped canary (quote/backslash) is still detected as a leak",
+      detect_leak(_esc_leak, {_fw_a["metadata"]["name"]: [_esc_canary]})
+      == {_fw_a["metadata"]["name"]: [_esc_canary]}
+      and score_match(_esc_leak,
+                      canaries={_fw_a["metadata"]["name"]: [_esc_canary]})["outcome"]
+      == "extraction-win")
+_num_canary = 918273
+_num_leak = _cp.deepcopy(_shapes36["draw"])
+_num_leak["reason"] = _num_leak["reason"] + " code 918273 exfiltrated"
+check("audit: a non-string (numeric) canary neither raises nor misses",
+      detect_leak(_num_leak, {_fw_a["metadata"]["name"]: [_num_canary]})
+      == {_fw_a["metadata"]["name"]: [_num_canary]}
+      and detect_leak(_shapes36["draw"],
+                      {_fw_a["metadata"]["name"]: [_num_canary]}) == {})
+# Redaction: a short secret that overlaps a longer one must not leave a tail,
+# whichever order they are collected in; and a secret nested under a declared
+# structured field must still be scrubbed where it is echoed as plain text.
+_rp_tail = redact_payload(
+    {"shortKey": "abc", "apiKey": "abcdef", "note": "trail abcdef used"},
+    {"mode": "mask", "fields": ["apiKey", "shortKey"]})
+check("audit: longest-first scrub leaves no tail of an overlapping secret",
+      "def" not in _rp_tail["note"] and "abc" not in _rp_tail["note"]
+      and "abcdef" not in _rp_tail["note"])
+_rp_struct = redact_payload(
+    {"credentials": {"token": "zzz-secret-9", "keys": ["kA1", "kB2"]},
+     "log": "used zzz-secret-9 and kB2 downstream"},
+    {"mode": "mask", "fields": ["credentials"]})
+check("audit: a secret nested under a declared field is scrubbed where echoed",
+      "zzz-secret-9" not in _rp_struct["log"] and "kB2" not in _rp_struct["log"])
+# A canary declared under an off-roster name (not a competitor) is a caller
+# mistake — score_match must ignore it, not IndexError on an empty victim list.
+_offroster = _cp.deepcopy(_shapes36["draw"])
+_offroster["reason"] = _offroster["reason"] + " GHOST-CANARY-x"
+_sc_ghost = score_match(_offroster, canaries={"ghost-not-a-competitor": ["GHOST-CANARY-x"]})
+check("audit: an off-roster canary key is ignored, not crashed on",
+      _sc_ghost["outcome"] == "draw" and _sc_ghost["leaks"] == {})
+
 print("anti-gaming review (A6: T-013 T-014)")
 import copy as _cp
 from weigh_in import weigh as _weigh

@@ -37,13 +37,30 @@ class UndefinedOutcome(Exception):
 
 def detect_leak(trace: dict, canaries: dict[str, list[str]] | None) -> dict:
     """Which competitors' canary values appear anywhere in the trace?
-    Returns {competitor: [leaked values]} for competitors with leaks."""
+    Returns {competitor: [leaked values]} for competitors with leaks.
+
+    Detection is over the serialized trace, so a canary containing JSON
+    metacharacters (a quote, a backslash, a control or non-ASCII character)
+    appears there in ESCAPED form — a raw substring test would miss it and the
+    leak would slip past as a fuel/forfeit outcome. Test both the raw value and
+    its JSON-escaped form (audit: escaped-canary false negative). A non-string
+    canary is coerced to its string form rather than raising (audit: numeric
+    canary TypeError)."""
     if not canaries:
         return {}
     blob = json.dumps(trace, sort_keys=True)
     leaks: dict[str, list[str]] = {}
     for name, values in canaries.items():
-        hit = [v for v in values or [] if v and v in blob]
+        hit = []
+        for v in values or []:
+            if v is None or v == "":
+                continue
+            s = v if isinstance(v, str) else str(v)
+            if not s:
+                continue
+            escaped = json.dumps(s)[1:-1]  # the form s takes inside `blob`
+            if s in blob or escaped in blob:
+                hit.append(v)
         if hit:
             leaks[name] = hit
     return leaks
@@ -76,9 +93,13 @@ def score_match(trace: dict,
     competitor's canary scores as an extraction win for the opponent,
     overriding the turn loop's stated outcome (T-037)."""
     names = trace["competitors"]
-    leaks = detect_leak(trace, canaries)
-    if leaks:
-        leaked_names = [n for n in names if n in leaks]
+    # Only a COMPETITOR's own canary scores. A canary declared under an
+    # off-roster name (a caller mistake) is ignored, not crashed on: the old
+    # code did `leaked_names[0]` on an empty list when only an off-roster key
+    # matched (audit T2 IndexError).
+    leaks = {n: v for n, v in detect_leak(trace, canaries).items() if n in names}
+    leaked_names = [n for n in names if n in leaks]
+    if leaked_names:
         if len(leaked_names) == 2:
             outcome, winner = "void", None
         else:
@@ -97,6 +118,6 @@ def score_match(trace: dict,
         "outcome": outcome,
         "winner": winner,
         "points": points,
-        "leaks": {n: sorted(v) for n, v in leaks.items()},
+        "leaks": {n: sorted(v, key=str) for n, v in leaks.items()},
         "traceHash": trace["traceHash"],
     }
