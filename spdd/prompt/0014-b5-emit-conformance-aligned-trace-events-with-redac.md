@@ -11,9 +11,9 @@ The trace is the evidence substrate for receipts, learning mode, and disputes.
 
 **DoD checklist:**
 
-- [ ] Every match emits a complete, ordered, replayable event stream
-- [ ] Redaction rules from the ADL are applied, not defaults
-- [ ] No credential or canary value appears anywhere in a stored trace
+- [x] Every match emits a complete, ordered, replayable event stream
+- [x] Redaction rules from the ADL are applied, not defaults
+- [x] No credential or canary value appears anywhere in a stored trace
 
 ## E — Entities / Handoff Objects
 
@@ -91,3 +91,4 @@ A trace records what happened. It does not by itself establish task success or r
 | Date | Divergence | Artifact update | Code/test update |
 |---|---|---|---|
 | 2026-08-05 | Generated from plan/backlog.yaml (ready) | initial | n/a |
+| 2026-08-24 | Artifact staleness (DISCOVER): the trace itself (hash-covered, with lifecycle/laneEvents/fuelAccounting) predates this node; what was missing was the DECLARED vocabulary. Emission is a pure projection of the trace into the ADL-declared observability event set (core/emit.py), with an explicit completeness accounting — a fast match where the loser never invoked a tool honestly reports tool.called missing rather than pretending. task.completed/task.failed are treated as alternatives (both declared required, exactly one occurs per completion) — worth a spec finding if this recurs upstream. No real secrets flow through the deterministic engine, so the redaction guarantee is: any payload routed through the emitter is redacted per the document's OWN declared rules (engine has no default list), two-level (declared fields masked wherever nested, then every value seen under a declared field scrubbed from all strings), and a document with no declared rules gets its payload withheld entirely — fail closed. tools/simulate.py untouched. | this row | `core/emit.py` (emit_events, redact_payload, declared_redaction, stream_contains); suite 174→186 (T-032 ×5, T-033 ×4, T-034 ×3) |
