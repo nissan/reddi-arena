@@ -45,6 +45,32 @@ check("same seed -> same winner", r1["winner"] == r2["winner"])
 check("different seeds can differ",
       len({run_vault_match(DEF, RAID, seed=s)["winner"] for s in range(20)}) >= 1)
 
+# Audit E6/L3: the hire defense bonus comes from the hire's DECLARED grant
+# (extensions.x-arena.grants.defenseBonus), never inferred from its name. The
+# old name-substring key was farmable (any doc named "...source-auditor...")
+# and dodgeable (a real auditor named otherwise). Real MERC declares 15, so the
+# balance fixtures are unchanged; only adversarial name/grant mismatches move.
+import copy as _cp_db
+from arena import DEFENSE_BONUS_CAP as _DBCAP
+_merc_win = [run_vault_match(DEF, RAID, seed=s, hire_a=MERC)["winner"] for s in range(40)]
+_solo_win = [run_vault_match(DEF, RAID, seed=s)["winner"] for s in range(40)]
+_db_farm = _cp_db.deepcopy(MERC)
+_db_farm["metadata"]["name"] = "source-auditor-imposter"
+_db_farm["extensions"]["x-arena"]["grants"].pop("defenseBonus", None)
+check("E6/L3 a hire named like an auditor but declaring no grant gets no bonus",
+      [run_vault_match(DEF, RAID, seed=s, hire_a=_db_farm)["winner"]
+       for s in range(40)] == _solo_win)
+_db_dodge = _cp_db.deepcopy(MERC)
+_db_dodge["metadata"]["name"] = "plain-helper"
+check("E6/L3 a differently-named hire that declares the grant still earns it",
+      [run_vault_match(DEF, RAID, seed=s, hire_a=_db_dodge)["winner"]
+       for s in range(40)] == _merc_win)
+_db_over = _cp_db.deepcopy(MERC)
+_db_over["extensions"]["x-arena"]["grants"]["defenseBonus"] = 999
+check("E6/L3 an over-declared grant is clamped to DEFENSE_BONUS_CAP",
+      [run_vault_match(DEF, RAID, seed=s, hire_a=_db_over)["winner"]
+       for s in range(40)] == _merc_win and _DBCAP == 15)
+
 print("weigh-in and draft")
 solo = weigh_competitor(DEF)
 check("defender is 62 AU Antweight", solo["soloAU"] == 62 and solo["soloClass"] == "Antweight")

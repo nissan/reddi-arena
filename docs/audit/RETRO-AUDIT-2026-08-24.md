@@ -110,10 +110,15 @@ Reviewer verdict: FINDINGS. **Remediation status (2026-08-24):**
   targeting, and the `maxInvocations` cap — every lane-enforced input) and L5
   (egress/policy-target/cap escape tests added). Independent review found and
   closed a follow-on blocker (the invocation cap) before merge.
+- **Landed** (`fix/declared-defense-bonus`): L3/E6 — the in-match hire defense
+  bonus is now read from the hire's declared `x-arena.grants.defenseBonus`
+  (fault-checked, clamped to `DEFENSE_BONUS_CAP`) instead of a name substring,
+  closing the farm (fake name) and dodge (real auditor, other name) vectors.
+  Outcome-neutral: the source-auditor fixture already declares 15, so the
+  balance sweep is unchanged (no regen).
 - **Land-last (outcome-changing) batch:** L2 (draft class-ceiling enforcement =
   E7) and L4 (lane authorization gating the outcome) are the user-approved
   game-rule changes — decision recorded, BALANCE-REPORT regen required.
-  L3 (in-match hire bonus keyed on name substring = E6) rides the same batch.
 - **Follow-up:** L6 nit (`HIRE_DEPTH_CAP` sub-hire scope).
 
 | id | sev | finding | disposition |

@@ -112,6 +112,11 @@ def weigh_competitor(doc: dict, hires: list[dict] | None = None) -> dict:
 # The cap is checked before any weighing, so hire chains can never recurse.
 HIRE_DEPTH_CAP = 1
 
+# Arena-local ceiling on the defense bonus a single hire's DECLARED grant
+# (extensions.x-arena.grants.defenseBonus) may confer, so a mercenary cannot
+# declare an unbounded advantage (audit E6/L3).
+DEFENSE_BONUS_CAP = 15
+
 
 def evaluate_hire_chain(competitor_doc: dict, chain: list[dict],
                         entered_class: str) -> DraftResult:
@@ -177,8 +182,9 @@ def evaluate_hire(competitor_doc: dict, merc_doc: dict, entered_class: str) -> D
 # --------------------------------------------------------------------------
 # A bot's play is read from its x-arena.strategy block (attack/defend profiles),
 # NOT from a live model. Two numbers per bot: attack (0-100) and defense (0-100).
-# A hired source-auditor grants a defense bonus (it catches untrusted-source
-# citation traps), modelling the real capability the mercenary declares.
+# A hire grants a defense bonus only through its DECLARED x-arena grant (it
+# catches untrusted-source citation traps), modelling the real capability the
+# mercenary declares — read from the document, not inferred from its name.
 
 def _dig(doc, *keys):
     """Walk nested mappings. Returns (value_or_None, ok); ok is False if any
@@ -415,13 +421,20 @@ def run_vault_match(bot_a: dict, bot_b: dict, seed: int = 0,
     probe_tool = [find_tool(bot_a, "probe"), find_tool(bot_b, "probe")]
     seal_tool = [find_tool(bot_a, "seal"), find_tool(bot_b, "seal")]
 
-    # A hired source-auditor raises defense: it flags untrusted-source citation
-    # traps the opponent would otherwise land. Bounded, declared, honest.
+    # A hire raises its employer's defense only by a DECLARED, bounded grant in
+    # its own ADL (extensions.x-arena.grants.defenseBonus) — never by its name.
+    # Keying on a name substring was both farmable (any doc named
+    # "...source-auditor..." claimed +15 for free) and dodgeable (a real auditor
+    # named otherwise earned nothing) — audit E6/L3. The grant is fault-checked
+    # and clamped to [0, DEFENSE_BONUS_CAP] so a mercenary cannot declare its way
+    # to an unbounded advantage.
     defense_bonus = [0, 0]
     for i, hire in enumerate([hire_a, hire_b]):
-        hire_name = _competitor_name(hire) if hire else None
-        if hire_name and "source-auditor" in hire_name:
-            defense_bonus[i] = 15
+        if not hire:
+            continue
+        granted, ok = _dig(hire, "extensions", "x-arena", "grants", "defenseBonus")
+        if ok and _is_number(granted) and granted > 0:
+            defense_bonus[i] = min(int(granted), DEFENSE_BONUS_CAP)
 
     # Deterministic pseudo-random stream from the seed (LCG; not for crypto).
     state = (seed * 2654435761 + 40503) & 0xFFFFFFFF
