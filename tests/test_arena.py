@@ -498,6 +498,73 @@ check("T-081 no ban mechanism exists in the audit module",
 check("T-081 an empty audit series is safe and unflagged",
       flag_sustained([])["flagged"] is False)
 
+print("trace emission with declared redaction (B5: T-032 T-033 T-034)")
+from core.emit import (
+    emit_events, redact_payload, declared_redaction, stream_contains, WITHHELD,
+)
+
+# T-032 — every match emits a complete, ordered, replayable event stream.
+_em_trace = run_vault_match(DEF, RAID, seed=2)
+_em = emit_events(_em_trace, DEF, RAID)
+_seqs = [e["seq"] for e in _em["stream"]]
+check("T-032 stream is ordered: one monotonic sequence, started first, completed last",
+      _seqs == list(range(len(_seqs)))
+      and _em["stream"][0]["event"] == "trace.started"
+      and _em["stream"][-1]["event"] == "trace.completed"
+      and _em["stream"][-1]["payload"]["traceHash"] == _em_trace["traceHash"])
+check("T-032 both-sides match satisfies every declared required event",
+      all(c["missing"] == [] for c in _em["completeness"].values()))
+check("T-032 stream is replayable: same trace -> identical stream",
+      emit_events(run_vault_match(DEF, RAID, seed=2), DEF, RAID) == _em)
+_em_forfeit = emit_events(_forfeit, _smuggled, RAID)
+check("T-032 a forfeit reports honest completeness and a task.failed event",
+      "tool.called" in _em_forfeit["completeness"][DEF["metadata"]["name"]]["missing"]
+      and any(e["event"] == "task.failed"
+              and e["competitor"] == DEF["metadata"]["name"]
+              for e in _em_forfeit["stream"]))
+check("T-032 lane decisions surface as declared policy.checked/tool.called events",
+      any(e["event"] == "policy.checked" for e in _em["stream"])
+      and any(e["event"] == "tool.called" for e in _em["stream"]))
+
+# T-033 — redaction rules come from the DOCUMENT's declaration, not engine
+# defaults. The reference docs declare fields [defendedSecret, canaryValue].
+check("T-033 declared redaction is read from the document",
+      declared_redaction(DEF)["fields"] == ["defendedSecret", "canaryValue"])
+_red = redact_payload({"defendedSecret": "hunter2", "open": "fine"},
+                      declared_redaction(DEF))
+check("T-033 declared fields are masked, undeclared fields pass through",
+      _red["defendedSecret"] == "[REDACTED:defendedSecret]"
+      and _red["open"] == "fine")
+_custom = _cp.deepcopy(DEF)
+_custom["harness"]["observability"]["redaction"]["fields"] = ["strategyNotes"]
+_red_c = redact_payload({"strategyNotes": "s3cret", "defendedSecret": "visible"},
+                        declared_redaction(_custom))
+check("T-033 a different declaration redacts ITS fields — proof rules are not defaults",
+      _red_c["strategyNotes"] == "[REDACTED:strategyNotes]"
+      and _red_c["defendedSecret"] == "visible")
+check("T-033 no declared rules -> payload withheld entirely (fail closed)",
+      redact_payload({"anything": "x"}, None) == {"withheld": WITHHELD})
+
+# T-034 — adversarial: no canary value appears anywhere in the stored
+# stream, even nested or echoed under a different key.
+_canary = "CANARY-9f3a-vault"
+_pay = {DEF["metadata"]["name"]: {
+    "vault": [{"deep": {"canaryValue": _canary}}],
+    "echo": f"the secret is {_canary}, honest",
+    "unrelated": "kept"}}
+_em_can = emit_events(_em_trace, DEF, RAID, payloads=_pay)
+check("T-034 planted canary never appears in the stored stream",
+      not stream_contains(_em_can, _canary))
+check("T-034 the echo under a different key is value-scrubbed, rest kept",
+      stream_contains(_em_can, "[SCRUBBED]")
+      and stream_contains(_em_can, "kept"))
+_no_rules = _cp.deepcopy(RAID)
+del _no_rules["harness"]["observability"]["redaction"]
+_em_nr = emit_events(run_vault_match(DEF, _no_rules, seed=2), DEF, _no_rules,
+                     payloads={_no_rules["metadata"]["name"]: {"k": _canary}})
+check("T-034 undeclared-redaction payload is withheld, canary never stored",
+      not stream_contains(_em_nr, _canary) and stream_contains(_em_nr, "withheld"))
+
 print("anti-gaming review (A6: T-013 T-014)")
 import copy as _cp
 from weigh_in import weigh as _weigh
