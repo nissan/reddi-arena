@@ -21,11 +21,13 @@ import json
 import os
 import sys
 import threading
+import time
 import urllib.error
 import urllib.request
+from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -50,6 +52,75 @@ PERSISTENT = bool(os.environ.get("DATA_DIR"))
 # Operator token for the waitlist admin endpoints. Unset = the endpoints do
 # not exist (404), so the deploy fails closed rather than open.
 ADMIN_TOKEN = os.environ.get("ARENA_ADMIN_TOKEN", "")
+
+# --- Hardening limits for the public surface --------------------------------
+# The service is internet-exposed on Railway with a persistent /data volume, so
+# every unauthenticated write path is bounded.
+MAX_BODY_BYTES = 64 * 1024          # reject oversized request bodies (slowloris/mem)
+MAX_WAITLIST_ENTRIES = 100_000      # cap total stored signups (disk exhaustion)
+SIGNUP_RATE_MAX = 20                # per-IP signups allowed within the window
+SIGNUP_RATE_WINDOW = 60.0           # seconds
+SOCKET_READ_TIMEOUT = 15.0          # per-connection read timeout
+
+# Stores share these across the ThreadingHTTPServer's handler threads: one lock
+# serializes the read-modify-write of every JSON store so concurrent requests
+# cannot lose entries or observe a half-written file.
+_STORE_LOCK = threading.RLock()
+# Per-IP signup timestamps for a lightweight fixed-window rate limit. Bounded by
+# active client count within the window; pruned on each check.
+_RATE_LOCK = threading.Lock()
+_SIGNUP_HITS: dict[str, deque] = {}
+
+
+def _read_json(path, default):
+    if not path.exists():
+        return default
+    with open(path) as fh:
+        return json.load(fh)
+
+
+def _write_json_atomic(path, obj):
+    """Write via a temp file + os.replace so a concurrent reader never sees a
+    truncated file, and a crash mid-write cannot corrupt the store."""
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    with open(tmp, "w") as fh:
+        json.dump(obj, fh, indent=2)
+    os.replace(tmp, path)
+
+
+def safe_adl_path(name):
+    """Resolve an ADL filename to a path INSIDE adl/ or return None.
+
+    The caller-supplied bot/hire fields reach open() — without this, an
+    absolute path or ../ traversal reads arbitrary files (path traversal /
+    DoS via /dev/zero). Only a bare .yaml/.yml file directly in adl/ passes.
+    """
+    adl_dir = (ROOT / "adl").resolve()
+    if not isinstance(name, str) or not name or "/" in name or "\\" in name:
+        return None
+    candidate = (adl_dir / name).resolve()
+    if candidate.parent != adl_dir or candidate.suffix not in (".yaml", ".yml"):
+        return None
+    if not candidate.is_file():
+        return None
+    return candidate
+
+
+def _rate_ok(client_ip):
+    """Fixed-window per-IP limit for unauthenticated signups."""
+    now = time.monotonic()
+    with _RATE_LOCK:
+        hits = _SIGNUP_HITS.setdefault(client_ip, deque())
+        while hits and now - hits[0] > SIGNUP_RATE_WINDOW:
+            hits.popleft()
+        if len(hits) >= SIGNUP_RATE_MAX:
+            return False
+        hits.append(now)
+        # Opportunistic cleanup so the map cannot grow without bound.
+        if len(_SIGNUP_HITS) > 10_000:
+            for ip in [k for k, v in _SIGNUP_HITS.items() if not v]:
+                _SIGNUP_HITS.pop(ip, None)
+        return True
 
 
 def mask_email(email):
@@ -184,27 +255,29 @@ def mercs():
 
 
 def record(trace):
-    ledger = json.load(open(LEDGER)) if LEDGER.exists() else {"matches": [], "standings": {}}
-    ledger["matches"].append({"competitors": trace["competitors"], "winner": trace["winner"],
-                              "seed": trace["seed"], "hash": trace["traceHash"]})
-    for name in trace["competitors"]:
-        ledger["standings"].setdefault(name, {"wins": 0, "losses": 0, "draws": 0, "credits": 0})
-    if trace["winner"]:
-        loser = [c for c in trace["competitors"] if c != trace["winner"]][0]
-        ledger["standings"][trace["winner"]]["wins"] += 1
-        ledger["standings"][trace["winner"]]["credits"] += 10
-        ledger["standings"][loser]["losses"] += 1
-    else:
+    with _STORE_LOCK:
+        ledger = _read_json(LEDGER, {"matches": [], "standings": {}})
+        ledger["matches"].append({"competitors": trace["competitors"], "winner": trace["winner"],
+                                  "seed": trace["seed"], "hash": trace["traceHash"]})
         for name in trace["competitors"]:
-            ledger["standings"][name]["draws"] += 1
-    json.dump(ledger, open(LEDGER, "w"), indent=2)
-    return ledger
+            ledger["standings"].setdefault(name, {"wins": 0, "losses": 0, "draws": 0, "credits": 0})
+        if trace["winner"]:
+            loser = [c for c in trace["competitors"] if c != trace["winner"]][0]
+            ledger["standings"][trace["winner"]]["wins"] += 1
+            ledger["standings"][trace["winner"]]["credits"] += 10
+            ledger["standings"][loser]["losses"] += 1
+        else:
+            for name in trace["competitors"]:
+                ledger["standings"][name]["draws"] += 1
+        _write_json_atomic(LEDGER, ledger)
+        return ledger
 
 
 def leaderboard():
-    if not LEDGER.exists():
+    with _STORE_LOCK:
+        ledger = _read_json(LEDGER, None)
+    if ledger is None:
         return {"matches": 0, "standings": []}
-    ledger = json.load(open(LEDGER))
     rows = sorted(ledger["standings"].items(),
                   key=lambda kv: (kv[1]["wins"], kv[1]["credits"]), reverse=True)
     return {"matches": len(ledger["matches"]),
@@ -212,6 +285,10 @@ def leaderboard():
 
 
 class Handler(BaseHTTPRequestHandler):
+    # Per-connection socket timeout: a slow/stalled client cannot hold a
+    # worker thread open indefinitely (slowloris).
+    timeout = SOCKET_READ_TIMEOUT
+
     def _send(self, obj, code=200, ctype="application/json"):
         body = obj if isinstance(obj, bytes) else json.dumps(obj).encode()
         self.send_response(code)
@@ -224,15 +301,36 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
     def _admin_ok(self):
-        # Accepts Authorization: Bearer <token> or ?token=<token>. With no
-        # ARENA_ADMIN_TOKEN configured, admin routes are indistinguishable
-        # from unknown paths.
+        # Header-only: Authorization: Bearer <token>. Query-string secrets leak
+        # through proxies, edge logs, and Referer, so they are not accepted.
+        # With no ARENA_ADMIN_TOKEN configured, admin routes are
+        # indistinguishable from unknown paths (fail closed).
         if not ADMIN_TOKEN:
             return False
         auth = self.headers.get("Authorization", "")
-        supplied = auth[7:] if auth.startswith("Bearer ") else \
-            parse_qs(urlparse(self.path).query).get("token", [""])[0]
+        supplied = auth[7:] if auth.startswith("Bearer ") else ""
         return hmac.compare_digest(supplied, ADMIN_TOKEN)
+
+    def _client_ip(self):
+        return self.client_address[0] if self.client_address else "?"
+
+    def _read_body(self):
+        """Read and JSON-parse the request body, bounded. Returns (obj, None)
+        or (None, error_response_already_sent_flag)."""
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+        except (TypeError, ValueError):
+            self._send({"error": "bad content-length"}, 400)
+            return None, True
+        if length > MAX_BODY_BYTES:
+            self._send({"error": "request too large"}, 413)
+            return None, True
+        raw = self.rfile.read(length) if length > 0 else b""
+        try:
+            return json.loads(raw or "{}"), None
+        except (ValueError, UnicodeDecodeError):
+            self._send({"error": "invalid JSON"}, 400)
+            return None, True
 
     def do_GET(self):
         path = urlparse(self.path).path
@@ -263,15 +361,28 @@ class Handler(BaseHTTPRequestHandler):
                                "persistent": PERSISTENT})
         return self._send({"error": "not found"}, 404)
 
+    def _load_bot(self, name):
+        """Resolve a caller-supplied ADL filename safely, or None."""
+        path = safe_adl_path(name)
+        return load_adl(str(path)) if path else None
+
+    def _seed(self, req, default):
+        try:
+            return int(req.get("seed", default))
+        except (TypeError, ValueError):
+            return default
+
     def do_POST(self):
         path = urlparse(self.path).path
-        length = int(self.headers.get("Content-Length", 0))
-        req = json.loads(self.rfile.read(length) or "{}")
-        adl_dir = ROOT / "adl"
+        req, err = self._read_body()
+        if err:
+            return
 
         if path == "/api/draft":
-            comp = load_adl(adl_dir / req["bot"])
-            merc = load_adl(adl_dir / req["hire"])
+            comp = self._load_bot(req.get("bot"))
+            merc = self._load_bot(req.get("hire"))
+            if comp is None or merc is None:
+                return self._send({"error": "unknown bot or hire"}, 400)
             res = evaluate_hire(comp, merc, entered_class=req.get("class", "Antweight"))
             return self._send({
                 "allowed": res.allowed, "reason": res.reason,
@@ -281,26 +392,36 @@ class Handler(BaseHTTPRequestHandler):
             })
 
         if path == "/api/waitlist":
+            if not _rate_ok(self._client_ip()):
+                return self._send({"ok": False, "error": "rate limited"}, 429)
             email = (req.get("email") or "").strip().lower()
-            if "@" not in email or "." not in email.split("@")[-1]:
+            if not isinstance(email, str) or "@" not in email \
+                    or "." not in email.split("@")[-1] or len(email) > 254:
                 return self._send({"ok": False, "error": "invalid email"}, 400)
-            entries = json.load(open(WAITLIST)) if WAITLIST.exists() else []
-            existing = next((e for e in entries if e["email"] == email), None)
-            if existing:
-                existing["roles"] = sorted(set(existing["roles"]) | set(req.get("roles") or []))
-                pos = entries.index(existing) + 1
-            else:
-                entries.append({"email": email, "roles": req.get("roles") or ["compete"]})
-                pos = len(entries)
-            json.dump(entries, open(WAITLIST, "w"), indent=2)
+            roles = req.get("roles") or ["compete"]
+            if not isinstance(roles, list) or not all(isinstance(r, str) for r in roles):
+                return self._send({"ok": False, "error": "invalid roles"}, 400)
+            roles = [r[:40] for r in roles[:20]]
+            with _STORE_LOCK:
+                entries = _read_json(WAITLIST, [])
+                existing = next((e for e in entries if e["email"] == email), None)
+                if existing:
+                    existing["roles"] = sorted(set(existing["roles"]) | set(roles))
+                    pos = entries.index(existing) + 1
+                elif len(entries) >= MAX_WAITLIST_ENTRIES:
+                    return self._send({"ok": False, "error": "waitlist full"}, 503)
+                else:
+                    entries.append({"email": email, "roles": roles})
+                    pos = len(entries)
+                _write_json_atomic(WAITLIST, entries)
+                total = len(entries)
             if existing is None:  # confirmation email on first signup only
-                send_waitlist_emails(email, pos, req.get("roles") or ["compete"])
+                send_waitlist_emails(email, pos, roles)
             # Masked signup line for the host's deploy logs, so the operator
             # sees activity without polling the file. Full addresses stay in
             # waitlist.json only ("never sold or shared" landing promise).
             print(f"[waitlist] signup {mask_email(email)} "
-                  f"roles={','.join(req.get('roles') or ['compete'])} "
-                  f"position={pos} total={len(entries)}", flush=True)
+                  f"roles={','.join(roles)} position={pos} total={total}", flush=True)
             return self._send({"ok": True, "position": pos, "persistent": PERSISTENT})
 
         if path == "/api/waitlist/remove":
@@ -309,19 +430,23 @@ class Handler(BaseHTTPRequestHandler):
             if not self._admin_ok():
                 return self._send({"error": "not found"}, 404)
             email = (req.get("email") or "").strip().lower()
-            entries = json.load(open(WAITLIST)) if WAITLIST.exists() else []
-            kept = [e for e in entries if e["email"] != email]
-            removed = len(entries) - len(kept)
+            with _STORE_LOCK:
+                entries = _read_json(WAITLIST, [])
+                kept = [e for e in entries if e["email"] != email]
+                removed = len(entries) - len(kept)
+                if removed:
+                    _write_json_atomic(WAITLIST, kept)
+                    total = len(kept)
             if removed:
-                json.dump(kept, open(WAITLIST, "w"), indent=2)
-                print(f"[waitlist] removed {mask_email(email)} "
-                      f"total={len(kept)}", flush=True)
+                print(f"[waitlist] removed {mask_email(email)} total={total}", flush=True)
             return self._send({"ok": True, "removed": removed})
 
         if path == "/api/chain":
-            a = load_adl(adl_dir / req["botA"])
-            b = load_adl(adl_dir / req["botB"])
-            trace = run_vault_match(a, b, seed=int(req.get("seed", 2)))
+            a = self._load_bot(req.get("botA"))
+            b = self._load_bot(req.get("botB"))
+            if a is None or b is None:
+                return self._send({"error": "unknown bot"}, 400)
+            trace = run_vault_match(a, b, seed=self._seed(req, 2))
             proj = chain.project_match(
                 trace, a, b, "OwnerA1111", "OwnerB2222", "Judge3333",
                 gates_passed=bool(req.get("gatesPassed", True)),
@@ -331,11 +456,15 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(proj)
 
         if path == "/api/fight":
-            a = load_adl(adl_dir / req["botA"])
-            b = load_adl(adl_dir / req["botB"])
-            ha = load_adl(adl_dir / req["hireA"]) if req.get("hireA") else None
-            hb = load_adl(adl_dir / req["hireB"]) if req.get("hireB") else None
-            trace = run_vault_match(a, b, seed=int(req.get("seed", 0)), hire_a=ha, hire_b=hb)
+            a = self._load_bot(req.get("botA"))
+            b = self._load_bot(req.get("botB"))
+            if a is None or b is None:
+                return self._send({"error": "unknown bot"}, 400)
+            ha = self._load_bot(req["hireA"]) if req.get("hireA") else None
+            hb = self._load_bot(req["hireB"]) if req.get("hireB") else None
+            if (req.get("hireA") and ha is None) or (req.get("hireB") and hb is None):
+                return self._send({"error": "unknown hire"}, 400)
+            trace = run_vault_match(a, b, seed=self._seed(req, 0), hire_a=ha, hire_b=hb)
             record(trace)
             return self._send(trace)
 

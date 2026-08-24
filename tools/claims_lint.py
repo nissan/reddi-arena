@@ -32,6 +32,11 @@ BANNED = [
 ]
 NEGATION = re.compile(r"no claim|makes no|not\b|never\b|nothing here|without\b",
                       re.I)
+# A negation exempts a banned phrase only when it appears BEFORE the phrase
+# on the line ("nothing here is production-ready" is fine). A negation that
+# trails the claim does not exempt it: "production-ready and does not need
+# setup" is still an assertion and must fail (retro-audit finding — the old
+# line-global check let a trailing "not" exempt the whole line).
 ALLOWLIST = ["reddi-arena-production.up.railway.app"]
 
 errors = []
@@ -42,10 +47,13 @@ for path in SURFACES:
         text = text.replace(allowed, "")
     for lineno, line in enumerate(text.splitlines(), 1):
         for pattern in BANNED:
-            if re.search(pattern, line, re.I) and not NEGATION.search(line):
+            for m in re.finditer(pattern, line, re.I):
+                if NEGATION.search(line[:m.start()]):
+                    continue
                 errors.append(f"T-094 {path.relative_to(ROOT)}:{lineno}: "
                               f"assertive claim matches banned /{pattern}/: "
                               f"{line.strip()[:80]}")
+                break
 
 readme = (ROOT / "README.md").read_text()
 if "**Release state:**" not in readme:

@@ -855,6 +855,15 @@ with _tf.TemporaryDirectory(dir=ROOT / "tests") as _td:
                         capture_output=True, text=True)
     check("T-094 the lint bites: a doctored assertive claim fails the build",
           _doctored.returncode == 1 and "T-094" in _doctored.stdout)
+    # Hardening: a TRAILING negation must not exempt an assertive claim
+    # (the old line-global check let any "not" on the line pass).
+    _r.write_text(_r.read_text().replace(
+        "\nThe arena is fully audited and production ready.\n",
+        "\nThis is production-ready and does not need setup.\n"))
+    _trail = _sp.run([sys.executable, str(_copy / "tools" / "claims_lint.py")],
+                     capture_output=True, text=True)
+    check("T-094 a trailing negation does not exempt an assertive claim",
+          _trail.returncode == 1 and "T-094" in _trail.stdout)
 
 print("one-way canonicality (F3: T-092 T-093)")
 import hashlib as _hl
@@ -1110,6 +1119,67 @@ _s, _b = _req("GET", "/api/waitlist", token="test-token-123")
 check("waitlist empty after removal", _s == 200 and _b["count"] == 0)
 check("email masking keeps domain, hides local part",
       _srv.mask_email("player@example.com") == "pl***@example.com")
+
+# --- web surface hardening (retro-audit remediation) --------------------
+# Path traversal / arbitrary-file-open is refused: absolute paths, ../
+# escapes, non-yaml suffixes, and subdirectory names all reject at 400.
+_s_pt, _ = _req("POST", "/api/draft", {"bot": "/etc/hostname", "hire": "/etc/hostname"})
+check("hardening: absolute-path bot is refused, no arbitrary file open",
+      _s_pt == 400)
+_s_tr, _ = _req("POST", "/api/fight",
+                {"botA": "../../../etc/hostname", "botB": "antweight-vault-raider.adl.yaml"})
+check("hardening: ../ traversal in botA is refused", _s_tr == 400)
+check("hardening: safe_adl_path accepts only bare yaml files inside adl/",
+      _srv.safe_adl_path("antweight-vault-raider.adl.yaml") is not None
+      and _srv.safe_adl_path("../x.yaml") is None
+      and _srv.safe_adl_path("/etc/passwd") is None
+      and _srv.safe_adl_path("sub/dir.yaml") is None
+      and _srv.safe_adl_path("notes.txt") is None)
+# Malformed JSON and oversized bodies fail with a status, never a dropped
+# connection or a crash.
+import urllib.request as _ur2
+def _raw_post(path, raw_bytes, ctype="application/json"):
+    r = _ur2.Request(f"http://127.0.0.1:{_port}{path}", method="POST", data=raw_bytes)
+    r.add_header("Content-Type", ctype)
+    try:
+        return _ur2.urlopen(r, timeout=10).status
+    except _uerror.HTTPError as e:
+        return e.code
+check("hardening: malformed JSON body returns 400, not a dropped connection",
+      _raw_post("/api/draft", b"{not json") == 400)
+check("hardening: oversized request body is refused with 413",
+      _raw_post("/api/waitlist", b'{"email":"a@b.co","x":"' + b"z" * (70 * 1024) + b'"}') == 413)
+# Concurrent signups do not lose entries (lock + atomic write).
+import threading as _thr2
+_conc_dir = _tempfile.mkdtemp(prefix="arena-conc-test-")
+_os.environ["DATA_DIR"] = _conc_dir
+_spec2 = _ilu.spec_from_file_location("arena_server_conc", ROOT / "web" / "server.py")
+_srv2 = _ilu.module_from_spec(_spec2)
+_spec2.loader.exec_module(_srv2)
+_srv2.SIGNUP_RATE_MAX = 10_000  # disable the rate limit for this concurrency probe
+_httpd2 = _TServer(("127.0.0.1", 0), _srv2.Handler)
+_port2 = _httpd2.server_address[1]
+_threading.Thread(target=_httpd2.serve_forever, daemon=True).start()
+def _signup(i):
+    r = _urequest.Request(f"http://127.0.0.1:{_port2}/api/waitlist", method="POST",
+                          data=_wjson.dumps({"email": f"u{i}@ex.com"}).encode())
+    r.add_header("Content-Type", "application/json")
+    try:
+        _urequest.urlopen(r, timeout=10).read()
+    except Exception:
+        pass
+_threads = [_thr2.Thread(target=_signup, args=(i,)) for i in range(50)]
+for _t in _threads:
+    _t.start()
+for _t in _threads:
+    _t.join()
+_s_c, _b_c = _req_port = None, None
+import json as _cj
+with open(_os.path.join(_conc_dir, "waitlist.json")) as _fh:
+    _stored = _cj.load(_fh)
+check("hardening: 50 concurrent signups all persisted (no lost writes)",
+      len(_stored) == 50 and len({e["email"] for e in _stored}) == 50)
+_httpd2.shutdown()
 _httpd.shutdown()
 
 print("signup email (Resend, env-gated)")
