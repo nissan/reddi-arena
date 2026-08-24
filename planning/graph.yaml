@@ -530,7 +530,7 @@ nodes:
 - id: B5
   type: implementation
   title: Emit conformance-aligned trace events with redaction
-  status: ready
+  status: done
   objective: The trace is the evidence substrate for receipts, learning mode, and disputes.
   epic: E05
   lane: SL-B
@@ -557,6 +557,15 @@ nodes:
     - test-output
     - pr-review
     - spdd artifact (spdd/prompt/*-b5-*.md) Sync Log updated
+    recorded:
+    - 'PR #58 (merged 2026-08-24, closes #13): T-032/T-033/T-034 implemented —
+      core/emit.py projects the trace into the ADL-declared observability
+      event set (ordered, replayable, honest completeness accounting);
+      redaction from the document''s own declaration (no engine defaults),
+      two-level mask+value-scrub, fail-closed payload withholding without
+      declared rules; adversarial canary checks pass; suite 174->186;
+      E05 epic complete (B4 meters, B5 emits); Sync Log records the
+      re-scope and the task.completed/failed-alternatives observation.'
   boundary: A trace records what happened. It does not by itself establish task success or
     reputation eligibility.
   surfaces:
