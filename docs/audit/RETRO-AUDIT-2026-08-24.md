@@ -47,7 +47,7 @@ share the structured-outcome fix with subsystem 3).
 | E5 | major | void matches emit `result: "draw"`; chain settlement takes the wrong path | trace-integrity PR |
 | E6 | major | defense bonus keyed on a name substring, not the declared grant | game-rule PR / see L3 |
 | E7 | major | draft class-ceiling never enforced at match time | game-rule PR / see L2 |
-| E8 | minor | "fuel efficiency" tie-break decided at declaration time; parity bias on odd max_turns | game-rule PR |
+| E8 | minor | "fuel efficiency" tie-break decided at declaration time; parity bias on odd max_turns | **landed** `fix/honest-tiebreak` (honest naming + parity-fair) |
 | E9 | minor | `KeyError` on missing `metadata.name` | fault-hardening PR |
 | E10 | minor | non-terminal-trace invariant is an `assert` (vanishes under `python3 -O`) | fault-hardening PR |
 | E11 | nit | dead gate branch (`TURN_COST > cap` unreachable via run_vault_match) | comment only |

@@ -578,11 +578,31 @@ def run_vault_match(bot_a: dict, bot_b: dict, seed: int = 0,
         strategy = "probe" if probe_authorized else "fizzle"
         turns.append(Turn(n, names[attacker], strategy, probe, defense, turn_fuel, "held"))
 
-    # Turn limit reached, both secrets held -> tie-break on fuel efficiency.
+    # Turn limit reached, both secrets held -> tie-break on the larger remaining
+    # fuel reserve (audit E8). Two honesty/fairness fixes over the old "won on
+    # fuel efficiency":
+    #  * Naming: every turn costs the same flat TURN_COST, so this is NOT
+    #    efficiency — it is simply who has more fuel left (a reserve they paid AU
+    #    for). Call it that.
+    #  * Parity: attacks alternate from the seed-chosen opener, so on an ODD
+    #    max_turns the opener takes one extra attack and spends one extra flat
+    #    TURN_COST. Comparing raw remaining fuel would penalize whoever opened
+    #    purely by seed parity. Credit the extra attack's flat cost back to the
+    #    competitor who attacked more, comparing the reserves over an equal
+    #    number of attacks. On an even max_turns (the default and the balance
+    #    sweep) attacks are equal and the adjustment is a no-op.
     fuel_left = _remaining(meters)
-    if fuel_left[0] != fuel_left[1]:
-        winner = 0 if fuel_left[0] > fuel_left[1] else 1
-        reason = f"turn limit; {names[winner]} won on fuel efficiency"
+    attacks = [0, 0]
+    for _n in range(1, len(turns) + 1):
+        attacks[(opener + _n - 1) % 2] += 1
+    adjusted = list(fuel_left)
+    if attacks[0] != attacks[1]:
+        more = 0 if attacks[0] > attacks[1] else 1
+        adjusted[more] += turn_fuel
+    if adjusted[0] != adjusted[1]:
+        winner = 0 if adjusted[0] > adjusted[1] else 1
+        reason = (f"turn limit; {names[winner]} won on the larger remaining "
+                  f"fuel reserve (equal-attacks basis)")
         _kind = "fuel"
         lc.advance("decided", reason)
     else:
