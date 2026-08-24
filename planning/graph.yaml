@@ -485,7 +485,7 @@ nodes:
 - id: B4
   type: implementation
   title: Implement token fuel accounting
-  status: blocked
+  status: ready
   objective: Efficiency becomes a skill only if fuel is metered and enforced.
   epic: E05
   lane: SL-B
@@ -521,7 +521,7 @@ nodes:
 - id: B5
   type: implementation
   title: Emit conformance-aligned trace events with redaction
-  status: blocked
+  status: ready
   objective: The trace is the evidence substrate for receipts, learning mode, and disputes.
   epic: E05
   lane: SL-B
