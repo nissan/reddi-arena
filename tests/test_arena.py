@@ -679,6 +679,29 @@ check("T-025 history records the exact walked path append-only",
       == _paths["decided"]
       and _walked_to("decided").history[0]["from"] == "scheduled")
 
+print("github relation sync planner (GE02)")
+from sync_github_relations import build_plan as _ge02_plan, epic_body as _ge02_body
+import yaml as _yaml_ge02
+_ge02_graph_before = (ROOT / "planning" / "graph.yaml").read_text()
+_ge02 = _ge02_plan()
+check("GE02 plan mirrors every epic and every executable node as a sub-issue",
+      _ge02["epicCount"] == 16 and _ge02["subIssueCount"] == 36
+      and all(isinstance(c["issue"], int)
+              for e in _ge02["epics"] for c in e["subIssues"]))
+check("GE02 every graph epic is present exactly once, members are its nodes",
+      sorted(e["epic"] for e in _ge02["epics"])
+      == [f"E{n:02d}" for n in range(1, 17)]
+      and all(e["subIssues"] and e["marker"].startswith("<!-- graph-epic:")
+              for e in _ge02["epics"]))
+check("GE02 planning is read-only — graph.yaml is not mutated by the planner",
+      (ROOT / "planning" / "graph.yaml").read_text() == _ge02_graph_before)
+check("GE02 an existing epic is marked skip, not recreated (idempotent apply)",
+      _ge02_plan({"E01": 999})["epics"][0]["action"].startswith("skip")
+      and _ge02["epics"][0]["action"] == "create")
+check("GE02 epic body embeds the marker and its sub-issue references",
+      "<!-- graph-epic: E01 -->" in _ge02_body(_ge02["epics"][0])
+      and "#1" in _ge02_body(_ge02["epics"][0]))
+
 print("provider abstraction (B3: T-026 T-027 T-028)")
 import yaml as _yaml_b3
 from core.providers import (
