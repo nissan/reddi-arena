@@ -82,9 +82,13 @@ def build_plan(existing: dict[str, int] | None = None) -> dict:
             for dep in nodes[m].get("dependsOn") or []:
                 edges.append({"from": m, "to": dep,
                               "toIssue": issue_of.get(dep)})
-        title = (f"Epic {epic}: {', '.join(members)}"
-                 + (f"  [{'/'.join(lanes)}" if lanes else "")
-                 + (f" {'/'.join(phases)}]" if phases else ("]" if lanes else "")))
+        # Bracketed lane/phase tag, only when there is something to show — and
+        # always balanced (a phase without a lane must not emit a stray "]").
+        tag_parts = ["/".join(lanes)] if lanes else []
+        if phases:
+            tag_parts.append("/".join(phases))
+        tag = f"  [{' '.join(tag_parts)}]" if tag_parts else ""
+        title = f"Epic {epic}: {', '.join(members)}{tag}"
         plan_epics.append({
             "epic": epic,
             "title": title,
@@ -135,6 +139,11 @@ def main() -> int:
         existing = json.loads(a.existing)
     except json.JSONDecodeError as e:
         print(f"--existing is not valid JSON: {e}", file=sys.stderr)
+        return 2
+    if existing is None:
+        existing = {}
+    if not isinstance(existing, dict):
+        print("--existing must be a JSON object {epic: issueNumber}", file=sys.stderr)
         return 2
     plan = build_plan(existing)
     if a.bodies:
