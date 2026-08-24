@@ -146,7 +146,7 @@ harness:
   policies:
   - id: pol-tool-vault-seal
     capability: tool
-    subject: agent:antweight-vault-defender
+    subject: agent:antweight-vault-raider
     resource: tool:vaultSeal
     action: invoke
     effect: allow
@@ -160,7 +160,7 @@ harness:
       phase: before-execution
   - id: pol-tool-probe-compose
     capability: tool
-    subject: agent:antweight-vault-defender
+    subject: agent:antweight-vault-raider
     resource: tool:probeCompose
     action: invoke
     effect: allow
@@ -174,7 +174,7 @@ harness:
       phase: before-execution
   - id: pol-network-deny-all
     capability: network
-    subject: agent:antweight-vault-defender
+    subject: agent:antweight-vault-raider
     resource: net:*
     action: connect
     effect: deny
@@ -186,7 +186,7 @@ harness:
       phase: before-execution
   - id: pol-data-untrusted-noncitable
     capability: data
-    subject: agent:antweight-vault-defender
+    subject: agent:antweight-vault-raider
     resource: source:opponentChannel
     action: cite
     effect: deny
@@ -198,7 +198,7 @@ harness:
       phase: during-execution
   - id: pol-payment-deny-all
     capability: payment
-    subject: agent:antweight-vault-defender
+    subject: agent:antweight-vault-raider
     resource: x402:intent:*
     action: authorize
     effect: deny
