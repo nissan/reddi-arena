@@ -381,14 +381,22 @@ for _path in _PATHS:
                 _fuzz_crashes.append((_path, type(_val).__name__, type(_e).__name__))
 # Item-field injection: a bad value INSIDE a tool/policy/source/intent item
 # (the value class the reviewer flagged — an unhashable tool id, etc.).
+# ids whose STRING FORM contains a tool-search fragment ("probe"/"seal"):
+# find_tool selects by str-match, so such an id must not be returned
+# unhashable and then hashed by invoke() (audit round-3 C).
+_ID_VALUES = _BAD_VALUES + [["probe-core"], {"probe": 1}, {"seal"},
+                            ["seal-x"], {"sealer": 1}]
 for _coll, _field in [("tools", "id"), ("tools", "sideEffects"),
                       ("policies", "resource"), ("policies", "id"),
                       ("dataSources", "type"), ("functions", "id")]:
-    for _val in _BAD_VALUES:
+    _vals = _ID_VALUES if (_coll, _field) == ("tools", "id") else _BAD_VALUES
+    for _val in _vals:
         _d = _cp.deepcopy(DEF)
         _d.setdefault("harness", {})[_coll] = [{_field: _val}]
         _fuzz_n += 1
-        for _call in (lambda: run_vault_match(_d, RAID, seed=2), lambda: _w_fuzz(_d)):
+        for _call in (lambda: run_vault_match(_d, RAID, seed=2),
+                      lambda: run_vault_match(RAID, _d, seed=0),
+                      lambda: _w_fuzz(_d)):
             try:
                 _call()
             except Exception as _e:

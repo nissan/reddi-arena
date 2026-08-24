@@ -78,7 +78,15 @@ class ExecutionLane:
         resource = f"tool:{tool_id}"
         if self.escaped:
             return self._event(resource, action, False, "binding-mismatch")
-        if tool_id not in self.tools:
+        # A non-hashable id cannot be a declared tool (self.tools is keyed only
+        # by hashable ids) — refuse it as undeclared before the membership test
+        # so `tool_id not in self.tools` cannot raise 'unhashable type'
+        # (audit round-3 C).
+        try:
+            _declared = tool_id in self.tools
+        except TypeError:
+            _declared = False
+        if not _declared:
             return self._event(resource, action, False, "undeclared-tool")
         if self._matching(resource, action, "deny"):
             return self._event(resource, action, False, "denied-by-policy")
@@ -110,6 +118,14 @@ def find_tool(doc: dict, fragment: str) -> str | None:
     harness = doc.get("harness") if isinstance(doc, dict) else None
     tools = harness.get("tools") if isinstance(harness, dict) else None
     for tool in (tools if isinstance(tools, list) else []):
-        if isinstance(tool, dict) and fragment.lower() in str(tool.get("id", "")).lower():
-            return tool.get("id")
+        if not isinstance(tool, dict):
+            continue
+        tid = tool.get("id")
+        # Only a hashable scalar id can be invoked (the lane keys self.tools by
+        # it); a list/dict id whose string form matches the fragment must not
+        # be returned, or invoke() would hash it (audit round-3 C).
+        if not isinstance(tid, (str, int, float)) or isinstance(tid, bool):
+            continue
+        if fragment.lower() in str(tid).lower():
+            return tid
     return None
