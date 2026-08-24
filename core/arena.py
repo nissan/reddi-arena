@@ -540,11 +540,20 @@ def run_vault_match(bot_a: dict, bot_b: dict, seed: int = 0,
         probe = strat[attacker]["attack"] + nxt(20) - 10
         defense = strat[defender]["defense"] + defense_bonus[defender] + nxt(20) - 10
 
-        # Capability use goes through the lane or it does not happen (B1).
+        # Capability use goes through the lane or it does not happen — FAIL
+        # CLOSED (audit L4). The probe's extraction effect lands ONLY if the
+        # attacker actually holds the probe capability AND the lane authorized
+        # the invoke. An undeclared probe (no tool) or a lane-refused one
+        # (undeclared-tool / denied-by-policy / no-matching-policy /
+        # invocation-limit / binding-mismatch) produces NO in-match effect: the
+        # attack fizzles and the secret stays held, rather than extracting
+        # anyway. The refusal is still recorded in laneEvents as evidence.
+        probe_authorized = False
         if probe_tool[attacker]:
-            lanes[attacker].invoke(probe_tool[attacker])
+            probe_ev = lanes[attacker].invoke(probe_tool[attacker])
+            probe_authorized = bool(probe_ev.get("allowed"))
 
-        if probe > defense:
+        if probe_authorized and probe > defense:
             secret_held[defender] = False
             turns.append(Turn(n, names[attacker], "extract", probe, defense, turn_fuel, "extracted"))
             winner = attacker
@@ -554,9 +563,15 @@ def run_vault_match(bot_a: dict, bot_b: dict, seed: int = 0,
                              _remaining(meters), seed, lanes, bound_hashes, lc, meters,
                              outcome_kind="extraction", at_fault=[])
 
+        # The defender's seal is recorded through the lane as evidence; it has no
+        # mechanical effect on the seeded defense number, so there is no effect to
+        # suppress on refusal (unlike the probe above).
         if seal_tool[defender]:
             lanes[defender].invoke(seal_tool[defender])
-        turns.append(Turn(n, names[attacker], "probe", probe, defense, turn_fuel, "held"))
+        # A fizzled (unauthorized) probe and a genuine under-defense probe both
+        # leave the secret held; the laneEvents distinguish them for audit.
+        strategy = "probe" if probe_authorized else "fizzle"
+        turns.append(Turn(n, names[attacker], strategy, probe, defense, turn_fuel, "held"))
 
     # Turn limit reached, both secrets held -> tie-break on fuel efficiency.
     fuel_left = _remaining(meters)
