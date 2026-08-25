@@ -78,4 +78,7 @@ approvals are not usable while all PRs are authored by the operator's own
 account (GitHub forbids self-approval); the gate is process-enforced here
 until a second reviewing identity exists.
 
+The full playbook — the loop, the reviewer's charge, and the wave evidence
+that justifies the gate — is `40-independent-review-gate.md`.
+
 Before final merge, rebase onto the latest default branch and rerun required verification.
