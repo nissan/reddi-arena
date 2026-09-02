@@ -612,7 +612,7 @@ class Handler(BaseHTTPRequestHandler):
             # by the UI, but the explicit refusal boundary prevents a caller
             # from trying to turn the preview endpoint into a wallet/RPC/live
             # payment helper.
-            if req.get("network") not in (None, "solana-devnet"):
+            if req.get("network") not in (None, assurance.SOLANA_DEVNET_NETWORK_ALIAS):
                 return self._send({"error": "Solana Devnet Preview only; mainnet/testnet/live rail requests are blocked"}, 400)
             if req.get("paymentMode") not in (None, "fixture", "dry-run"):
                 return self._send({"error": "fixture/dry-run only; live payment mode is blocked"}, 400)

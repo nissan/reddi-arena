@@ -1779,6 +1779,36 @@ check("valid assurance receipt uses canonical RAP receipt/policy versions",
 check("valid assurance payment observation is fixture-backed and never grant evidence",
       _valid["adapters"]["paymentObservation"]["result"]["observation"]["evidence"]
       == {"source": "parsed-transaction-fixture", "grantEligible": False})
+for _case in _assurance_cases:
+    _bundle = assurance.build_assurance_preview(DEF, RAID, scenario=_case, seed=2)
+    _pay_result = _bundle["adapters"]["paymentObservation"]["result"]
+    _receipt = _bundle["receipt"]
+    _identity = assurance.canonical_fixture_rail_identity()
+    _receipt_identity_ok = True
+    if _receipt is not None:
+        _receipt_identity_ok = (
+            _receipt["metadata"]["fixtureRailIdentity"] == _identity
+            and _receipt["payment"]["network"] == _identity["networkAlias"]
+            and _receipt["payment"]["asset"] == _identity["asset"]
+            and _receipt["policyDecision"]["network"] == _identity["networkAlias"]
+            and _receipt["policyDecision"]["asset"] == _identity["asset"]
+            and _receipt["metadata"]["expectedPaymentTerms"]["network"] == _identity["networkAlias"]
+            and _receipt["metadata"]["expectedPaymentTerms"]["caip2"] == _identity["caip2"]
+            and _receipt["metadata"]["expectedPaymentTerms"]["mint"] == _identity["mint"]
+        )
+    _observation_identity_ok = True
+    if _pay_result.get("ok"):
+        _obs_case = _pay_result["observation"]
+        _observation_identity_ok = (
+            _obs_case["network"] == _identity["networkAlias"]
+            and _obs_case["mint"] == _identity["mint"]
+            and _obs_case["tokenProgram"] == _identity["tokenProgram"]
+            and _obs_case["decimals"] == _identity["decimals"]
+            and _pay_result["replayKey"].startswith(
+                f"spl-transfer-checked:{_identity['networkAlias']}:")
+        )
+    check(f"{_case} keeps payment observation, policy, and receipt identity on the canonical fixture rail",
+          _receipt_identity_ok and _observation_identity_ok)
 
 # reddi.svm-spl-transfer-checked-observation.v1 declares an exact member set
 # (packages/x402-solana/src/spl-token-observer.ts); Arena disclosure must not
@@ -1806,9 +1836,16 @@ check("assurance preview explains payment transfer is not paid work proof",
 # The official AUDD mainnet mint is a gated verified-mainnet identity upstream.
 # A devnet fixture presenting it would be an unsupported AUDD claim, so it must
 # not survive anywhere in the preview and must be refused at load/verify time.
+_devnet_fixture = assurance.load_payment_fixture()
 check("devnet fixture pays with the canonical synthetic AUDD sentinel mint",
-      assurance.load_payment_fixture()["expected"]["mint"]
+      _devnet_fixture["expected"]["mint"]
       == assurance.AUDD_DETERMINISTIC_FIXTURE_MINT)
+check("devnet fixture identity is the canonical deterministic Solana rail",
+      _devnet_fixture["railIdentity"] == assurance.canonical_fixture_rail_identity()
+      and _devnet_fixture["expected"]["network"] == assurance.SOLANA_DEVNET_NETWORK_ALIAS
+      and _devnet_fixture["railIdentity"]["caip2"] == assurance.SOLANA_DEVNET_CAIP2
+      and _devnet_fixture["expected"]["tokenProgram"] == assurance.SPL_TOKEN_PROGRAM_ID
+      and _devnet_fixture["expected"]["decimals"] == assurance.AUDD_DECIMALS)
 import json as _json_ass
 check("no preview scenario surfaces the official AUDD mainnet mint",
       all(assurance.AUDD_OFFICIAL_SOLANA_MAINNET_MINT
@@ -1822,6 +1859,15 @@ check("fixture verifier refuses an expectation naming the official AUDD mainnet 
       _official["ok"] is False and _official["reason"] == "wrong_mint"
       and _official["arenaRefusal"] == "official_mint_blocked"
       and assurance.AUDD_OFFICIAL_SOLANA_MAINNET_MINT not in _json_ass.dumps(_official))
+for _label, _expected in (
+        ("mainnet network", dict(assurance.load_payment_fixture()["expected"], network="solana-mainnet-beta")),
+        ("unknown network", dict(assurance.load_payment_fixture()["expected"], network="solana-preview")),
+        ("wrong CAIP-2", dict(assurance.load_payment_fixture()["expected"],
+                               caip2="solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"))):
+    _res = assurance.verify_spl_transfer_checked_fixture(
+        assurance.load_payment_fixture()["parsedTransaction"], _expected)
+    check(f"fixture verifier refuses {_label} instead of accepting arbitrary network identity",
+          _res["ok"] is False and _res["reason"] == "malformed_expected_payment")
 # The refusal must also cover the observed side: a parsed transaction carrying
 # the official mint must not reach candidate matching, which would echo it back
 # through the adapter result as an "actual" value.
@@ -1903,6 +1949,17 @@ def _empty_post_token_balances(fixture):
 
 
 _good_fixture_text = _real_fixture_path.read_text()
+
+
+def _fixture_text_with(path, value):
+    _doc = _json_ass.loads(_good_fixture_text)
+    _node = _doc
+    for _part in path[:-1]:
+        _node = _node[_part]
+    _node[path[-1]] = value
+    return _json_ass.dumps(_doc)
+
+
 _broken_fixtures = {
     "truncated json": "",
     "json array not object": "[]",
@@ -1916,6 +1973,19 @@ _broken_fixtures = {
         {**_json_ass.loads(_good_fixture_text), "expected": []}),
     "wrong-typed parsedTransaction": _json_ass.dumps(
         {**_json_ass.loads(_good_fixture_text), "parsedTransaction": "not-an-object"}),
+    "missing rail identity": _json_ass.dumps(
+        {k: v for k, v in _json_ass.loads(_good_fixture_text).items() if k != "railIdentity"}),
+    "mainnet expected network": _fixture_text_with(("expected", "network"), "solana-mainnet-beta"),
+    "unknown expected network": _fixture_text_with(("expected", "network"), "solana-preview"),
+    "rail identity network conflict": _fixture_text_with(("railIdentity", "networkAlias"), "solana-mainnet-beta"),
+    "rail identity CAIP conflict": _fixture_text_with(("railIdentity", "caip2"), "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"),
+    "expected CAIP conflict": _fixture_text_with(("expected", "caip2"), "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"),
+    "wrong expected token program": _fixture_text_with(("expected", "tokenProgram"), "TokenzQdBNbLqP5VEhdkAS6EP8pNJGvvnzQ74d7Gkwb"),
+    "wrong expected decimals": _fixture_text_with(("expected", "decimals"), 9),
+    "wrong parsed payment mint": _fixture_text_with(("parsedTransaction", "transaction", "message", "instructions", 0, "parsed", "info", "mint"),
+                                                      "WrongAuddMint1111111111111111111111111111111"),
+    "wrong parsed balance program": _fixture_text_with(("parsedTransaction", "meta", "postTokenBalances", 0, "programId"),
+                                                        "TokenzQdBNbLqP5VEhdkAS6EP8pNJGvvnzQ74d7Gkwb"),
     "memo instruction where the transfer should be": _json_ass.dumps(
         _swap_only_instruction_for_memo(_json_ass.loads(_good_fixture_text))),
     "no destination token balance": _json_ass.dumps(
@@ -2417,6 +2487,24 @@ check("a corrupt preview fixture is a sanitized 500, not a client-blaming 400",
       _s == 500 and "error" in _b
       and str(_bad_path_api) not in _b["error"]
       and assurance.AUDD_OFFICIAL_SOLANA_MAINNET_MINT not in _b["error"])
+_real_doc_api = _wjson.loads(_real_path_api.read_text())
+_real_doc_api["expected"]["network"] = "solana-mainnet-beta"
+with _tmp_api.NamedTemporaryFile("w", suffix=".json", delete=False) as _fh_api:
+    _wjson.dump(_real_doc_api, _fh_api)
+    _bad_path_api = Path(_fh_api.name)
+try:
+    _srv.assurance.FIXTURE_PATH = _bad_path_api
+    _s, _b = _req("POST", "/api/assurance",
+                  {"botA": "antweight-vault-defender.adl.yaml",
+                   "botB": "antweight-vault-raider.adl.yaml",
+                   "scenario": "valid-receipt"})
+finally:
+    _srv.assurance.FIXTURE_PATH = _real_path_api
+    _bad_path_api.unlink()
+check("a fixture claiming mainnet while the preview claims Devnet is a sanitized 500",
+      _s == 500 and "error" in _b
+      and str(_bad_path_api) not in _b["error"]
+      and "solana-mainnet-beta" not in _b["error"])
 
 print("Devnet Preview exposure gate (flag + deployment context, default off)")
 # The preview is fixture-only and reaches no wallet/RPC/signing/custody path,

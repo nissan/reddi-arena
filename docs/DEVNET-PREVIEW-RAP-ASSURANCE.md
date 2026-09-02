@@ -43,6 +43,15 @@ uses existing boundaries:
 The payment fixture uses the canonical `AUDD_DETERMINISTIC_FIXTURE_MINT`
 sentinel (`AUDDdev111111111111111111111111111111111111`) on the
 `deterministic-fixture` rail, which is `non_eligible` for grant volume. The
+Arena-owned `railIdentity` around the canonical x402 expected-payment object is
+fixed to `networkAlias=solana-devnet`,
+`caip2=solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1`, the SPL Token program, six
+AUDD decimals, and that synthetic sentinel mint. `load_payment_fixture()`
+requires the rail identity, the x402 expected terms, and the parsed paying
+`TransferChecked` observation to resolve to that exact identity before any
+receipt or policy projection is built. A mainnet, unknown, conflicting CAIP-2,
+wrong-program, wrong-decimal, or mismatched observed identity is fixture
+corruption and reaches the sanitized 500 path, not an accepted receipt. The
 official AUDD mainnet mint is never a fixture value: `load_payment_fixture()`
 refuses a fixture carrying it, and the verifier refuses it on both the expected
 terms and the parsed transaction without echoing the mint back.
@@ -107,12 +116,12 @@ in `paymentEvidence` values or the settlement proof.
 
 A fixture that is unreadable, unparseable, or the wrong shape is a server-side
 defect, not caller error: `load_payment_fixture()` validates the file, its
-required top-level keys, its expected-terms keys, the base-unit amount, and the
-`parsedTransaction` paths every scenario reaches into (a parsed
-`TransferChecked` instruction and the `postTokenBalances` entry for its
-destination account). Each failure raises `AssuranceIntegrityError`, which
-`/api/assurance` answers with a sanitized 500 plus a bounded server-side log
-line. Only caller error is a 400: a body that is not a top-level JSON object
+required top-level keys, its Arena-owned rail identity, its expected-terms keys,
+the base-unit amount, and the `parsedTransaction` paths every scenario reaches
+into (the one paying `TransferChecked` instruction and the `postTokenBalances`
+entry for its destination account). Each failure raises `AssuranceIntegrityError`,
+which `/api/assurance` answers with a sanitized 500 plus a bounded server-side
+log line. Only caller error is a 400: a body that is not a top-level JSON object
 (rejected for every POST route immediately after parsing, before any field is
 read), a malformed or unknown `scenario`, an unknown bot, hire or weight
 class, or a request that asks the preview to leave its boundary (`network`

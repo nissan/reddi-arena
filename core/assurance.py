@@ -44,6 +44,11 @@ SPL_OBSERVER_VERSION = "reddi.x402-solana.spl-transfer-checked-observer.v1"
 PREVIEW_FORMAT_VERSION = "reddi.arena.rap-assurance-preview.v1"
 FINALIZED_AT = "2026-08-31T00:00:00Z"
 SPL_MEMO_PROGRAM_ID = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"
+SPL_TOKEN_PROGRAM_ID = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+SOLANA_DEVNET_NETWORK_ALIAS = "solana-devnet"
+SOLANA_DEVNET_CAIP2 = "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1"
+AUDD_ASSET = "AUDD"
+AUDD_DECIMALS = 6
 
 # Mirrors the canonical AUDD rail config's `deterministic-fixture` environment
 # (packages/agent-protocol/src/audd-rail-config.ts). The sentinel mint must
@@ -52,9 +57,14 @@ SPL_MEMO_PROGRAM_ID = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"
 AUDD_DETERMINISTIC_FIXTURE_MINT = "AUDDdev111111111111111111111111111111111111"
 AUDD_OFFICIAL_SOLANA_MAINNET_MINT = "AUDDttiEpCydTm7joUMbYddm72jAWXZnCpPZtDoxqBSw"
 AUDD_FIXTURE_RAIL = {
+    "asset": AUDD_ASSET,
     "environment": "deterministic-fixture",
     "status": "deterministic-fixture-only",
+    "networkAlias": SOLANA_DEVNET_NETWORK_ALIAS,
+    "caip2": SOLANA_DEVNET_CAIP2,
     "mint": AUDD_DETERMINISTIC_FIXTURE_MINT,
+    "tokenProgram": SPL_TOKEN_PROGRAM_ID,
+    "decimals": AUDD_DECIMALS,
     "grantEligibility": "non_eligible",
     "evidenceEnvironment": "deterministic-fixture",
 }
@@ -136,7 +146,7 @@ CANONICAL_REFS = {
 }
 
 BOUNDARY_FLAGS = {
-    "cluster": "solana-devnet",
+    "cluster": SOLANA_DEVNET_NETWORK_ALIAS,
     "previewOnly": True,
     # What this code can actually prove about itself: building a preview
     # performs no deployment. Whether the process answering the request is
@@ -357,6 +367,66 @@ def _official_mint_present(obj: Any) -> bool:
     return AUDD_OFFICIAL_SOLANA_MAINNET_MINT in json.dumps(obj, default=str)
 
 
+def canonical_fixture_rail_identity() -> dict:
+    """The only AUDD/Solana identity this preview may use for server-owned fixtures."""
+    return dict(AUDD_FIXTURE_RAIL)
+
+
+def _identity_mismatch(message: str) -> None:
+    raise AssuranceIntegrityError(f"preview fixture AUDD rail identity mismatch: {message}")
+
+
+def _expect_identity_value(label: str, actual: Any, expected: Any) -> None:
+    if actual != expected:
+        _identity_mismatch(f"{label} must be {expected!r}")
+
+
+def _validate_fixture_rail_identity(fixture: dict) -> dict:
+    """Validate the Arena-owned rail identity around the canonical x402 fixture.
+
+    The x402 observer accepts an arbitrary non-empty network string because the
+    canonical observer is chain-agnostic. This preview is not: it owns exactly
+    one deterministic AUDD fixture rail. If a contributed server-owned fixture
+    changes the network alias, CAIP-2 chain id, mint, token program, decimals,
+    or expected/parsed payment identity, that is fixture corruption and must be
+    refused before assurance evaluation can create a receipt.
+    """
+    identity = fixture.get("railIdentity")
+    if not isinstance(identity, dict):
+        _identity_mismatch("railIdentity must be a JSON object")
+    canonical = AUDD_FIXTURE_RAIL
+    for key, expected in canonical.items():
+        _expect_identity_value(f"railIdentity.{key}", identity.get(key), expected)
+    for top_key, identity_key in (
+        ("railEnvironment", "environment"),
+        ("railStatus", "status"),
+        ("grantEligibility", "grantEligibility"),
+        ("evidenceEnvironment", "evidenceEnvironment"),
+    ):
+        if top_key in fixture:
+            _expect_identity_value(top_key, fixture.get(top_key), canonical[identity_key])
+
+    expected_terms = fixture["expected"]
+    _expect_identity_value("expected.network", expected_terms.get("network"), canonical["networkAlias"])
+    if "caip2" in expected_terms:
+        _expect_identity_value("expected.caip2", expected_terms.get("caip2"), canonical["caip2"])
+    if "caip2Network" in expected_terms:
+        _expect_identity_value("expected.caip2Network", expected_terms.get("caip2Network"), canonical["caip2"])
+    _expect_identity_value("expected.mint", expected_terms.get("mint"), canonical["mint"])
+    _expect_identity_value("expected.tokenProgram", expected_terms.get("tokenProgram"), canonical["tokenProgram"])
+    if expected_terms.get("decimals") != canonical["decimals"]:
+        _identity_mismatch(f"expected.decimals must be {canonical['decimals']!r}")
+
+    paying_info = _paying_instruction_info(fixture["parsedTransaction"], expected_terms)
+    destination = _destination_balance(fixture["parsedTransaction"], paying_info)
+    _expect_identity_value("parsed TransferChecked.mint", paying_info.get("mint"), canonical["mint"])
+    _expect_identity_value("destination token balance mint", destination.get("mint"), canonical["mint"])
+    _expect_identity_value("destination token balance programId", destination.get("programId"), canonical["tokenProgram"])
+    _expect_identity_value("destination token balance decimals",
+                           _get_path(destination, "uiTokenAmount", "decimals"), canonical["decimals"])
+    return identity
+
+
 def preview_labels() -> dict:
     """Arena-owned Devnet Preview disclosure, outside every canonical schema."""
     return {
@@ -403,8 +473,7 @@ def load_payment_fixture() -> dict:
             "Devnet preview fixtures must never carry the official AUDD mainnet mint; "
             f"use {AUDD_DETERMINISTIC_FIXTURE_MINT}"
         )
-    _destination_balance(fixture["parsedTransaction"],
-                         _transfer_instruction_info(fixture["parsedTransaction"]))
+    _validate_fixture_rail_identity(fixture)
     return fixture
 
 
@@ -739,6 +808,37 @@ def _validate_expected(expected: dict, commitment: str) -> dict | None:
             AUDD_DETERMINISTIC_FIXTURE_MINT,
             arena_refusal="official_mint_blocked",
         )
+    if expected["network"] != SOLANA_DEVNET_NETWORK_ALIAS:
+        return _payment_failure(
+            "malformed_expected_payment",
+            "expected network must be the deterministic Solana Devnet fixture identity",
+            SOLANA_DEVNET_NETWORK_ALIAS,
+        )
+    for caip_key in ("caip2", "caip2Network"):
+        if caip_key in expected and expected.get(caip_key) != SOLANA_DEVNET_CAIP2:
+            return _payment_failure(
+                "malformed_expected_payment",
+                "expected CAIP-2 network must be the deterministic Solana Devnet fixture identity",
+                SOLANA_DEVNET_CAIP2,
+            )
+    if expected["mint"] != AUDD_DETERMINISTIC_FIXTURE_MINT:
+        return _payment_failure(
+            "wrong_mint",
+            "expected mint must be the deterministic AUDD fixture sentinel",
+            AUDD_DETERMINISTIC_FIXTURE_MINT,
+        )
+    if expected["tokenProgram"] != SPL_TOKEN_PROGRAM_ID:
+        return _payment_failure(
+            "wrong_token_program",
+            "expected token program must be the SPL Token program for the deterministic fixture rail",
+            SPL_TOKEN_PROGRAM_ID,
+        )
+    if expected.get("decimals") is not None and expected.get("decimals") != AUDD_DECIMALS:
+        return _payment_failure(
+            "wrong_decimals",
+            "expected decimals must match the deterministic AUDD fixture rail",
+            AUDD_DECIMALS,
+        )
     if commitment not in ("confirmed", "finalized"):
         return _payment_failure("missing_confirmation_metadata", "commitment must be confirmed or finalized")
     return None
@@ -804,7 +904,7 @@ def verify_spl_transfer_checked_fixture(
             return _payment_failure("memo_mismatch", "transaction memo does not match expected payment binding", expected_memo, memos)
 
     match = matches[0]
-    replay_key = f"spl-transfer-checked:{expected['network'].lower()}:{expected['signature']}:{match['index']}"
+    replay_key = f"spl-transfer-checked:{SOLANA_DEVNET_NETWORK_ALIAS}:{expected['signature']}:{match['index']}"
     if replay_store is not None and not replay_store.check_and_store(replay_key):
         return _payment_failure("replay_detected", "payment transfer has already been accepted by the replay store", replay_key)
 
@@ -813,7 +913,7 @@ def verify_spl_transfer_checked_fixture(
         "observation": {
             "schemaVersion": SPL_OBSERVATION_SCHEMA_VERSION,
             "verifierVersion": SPL_OBSERVER_VERSION,
-            "network": expected["network"],
+            "network": SOLANA_DEVNET_NETWORK_ALIAS,
             "signature": expected["signature"],
             "slot": parsed["slot"],
             "blockTime": block_time if isinstance(block_time, int) and not isinstance(block_time, bool) else None,
@@ -839,7 +939,12 @@ def verify_spl_transfer_checked_fixture(
     }
 
 
-def _policy_decision(allowed: bool, reason_codes: list[str], quote: dict | None = None) -> dict:
+def _policy_decision(allowed: bool, reason_codes: list[str], quote: dict | None = None,
+                     network: str = SOLANA_DEVNET_NETWORK_ALIAS) -> dict:
+    if network != SOLANA_DEVNET_NETWORK_ALIAS:
+        raise AssuranceIntegrityError("policy decision network must match the deterministic Solana Devnet fixture identity")
+    if quote is not None and quote.get("network") != network:
+        raise AssuranceIntegrityError("policy quote network must match the deterministic Solana Devnet fixture identity")
     unknown = sorted(code for code in reason_codes if code not in CANONICAL_POLICY_REASON_CODES)
     if unknown:
         raise AssuranceIntegrityError(
@@ -852,8 +957,8 @@ def _policy_decision(allowed: bool, reason_codes: list[str], quote: dict | None 
         "reasonCodes": reason_codes,
         "quotedAmount": quote,
         "limits": {"perRequestMaxBaseUnits": "3000000", "remainingBaseUnits": "500000"} if allowed else None,
-        "asset": "AUDD",
-        "network": "solana-devnet",
+        "asset": AUDD_ASSET,
+        "network": network,
         "approvalState": "approved" if allowed else "denied",
         "auditNotes": [
             "fixture-only local preview; no wallet, RPC, signing, custody, or transaction submission",
@@ -895,7 +1000,7 @@ def _observed_result(payment_result: dict) -> dict:
     return first if first.get("ok") else {}
 
 
-def _settlement_proof(observation: dict) -> dict:
+def _settlement_proof(observation: dict, identity: dict) -> dict:
     """Settlement proof built only from the payment observation.
 
     Without a verified observation nothing settled, so every observable field
@@ -903,13 +1008,19 @@ def _settlement_proof(observation: dict) -> dict:
     is then an incomplete evidence layer, which is what
     `rap_receipt.settlement.invalid` truthfully reports.
     """
+    network = identity["networkAlias"]
+    if network != SOLANA_DEVNET_NETWORK_ALIAS:
+        raise AssuranceIntegrityError("settlement proof network must match the deterministic Solana Devnet fixture identity")
+    cluster = f"{network} fixture"
+    if observation and observation.get("network") != network:
+        raise AssuranceIntegrityError("settlement proof observation network disagrees with the fixture identity")
     if not observation:
         return {
-            "cluster": "solana-devnet fixture",
+            "cluster": cluster,
             "confirmationStatus": "unverified",
         }
     return {
-        "cluster": "solana-devnet fixture",
+        "cluster": cluster,
         "signature": f"fixture:{observation['signature']}:{observation['instructionIndex']}",
         "mint": observation["mint"],
         "programId": observation["tokenProgram"],
@@ -931,6 +1042,7 @@ def _build_receipt(
 ) -> dict:
     fixture = fixture if fixture is not None else load_payment_fixture()
     expected = fixture["expected"]
+    identity = _validate_fixture_rail_identity(fixture)
     observed = _observed_result(payment_result)
     observation = _as_dict(observed.get("observation"))
     replay_key = observed.get("replayKey")
@@ -938,7 +1050,8 @@ def _build_receipt(
     payee = expected["payTo"]
     request = _request_envelope(trace, scenario)
     request_id = request["requestId"]
-    rail = "svm-spl-token-transfer-checked:solana-devnet:AUDD"
+    network = identity["networkAlias"]
+    rail = f"svm-spl-token-transfer-checked:{network}:{identity['asset']}"
     response_hash = trace["traceHash"]
     eval_report_hash = _hash({"gate": "vault-trace-determinism", "traceHash": response_hash, "status": eval_status})
     payment_response_hash = _hash({
@@ -948,16 +1061,17 @@ def _build_receipt(
         "mint": observation.get("mint"),
         "payee": observation.get("destinationOwner"),
     })
-    settlement = _settlement_proof(observation)
+    settlement = _settlement_proof(observation, identity)
     settlement_signature = settlement.get("signature")
     quote = {
         "amount": expected["amountBaseUnits"],
-        "asset": "AUDD",
-        "network": "solana-devnet",
+        "asset": identity["asset"],
+        "network": network,
         "source": "arena:vault-preview",
         "specialist": "arena:match-winner-or-referee",
     }
-    policy = _policy_decision(policy_allowed, ["allowed"] if policy_allowed else ["operator_denied"], quote if policy_allowed else None)
+    policy = _policy_decision(policy_allowed, ["allowed"] if policy_allowed else ["operator_denied"],
+                              quote if policy_allowed else None, network=network)
     prior = [payment_response_hash] if duplicate_payment else []
     status = "attested" if eval_status == "pass" else "failed"
 
@@ -969,8 +1083,8 @@ def _build_receipt(
         "specialist": {"id": "arena-referee", "endpoint": "local-fixture-only", "publicPaymentAddress": payee},
         "protocol": {"name": "Reddi Agent Protocol", "version": "v0.1 fixture"},
         "payment": {
-            "network": "solana-devnet",
-            "asset": "AUDD",
+            "network": network,
+            "asset": identity["asset"],
             "amount": observation.get("amountBaseUnits"),
             "paymentProofRef": (
                 f"fixture:spl-transfer-checked:{observation['signature']}:{observation['instructionIndex']}"
@@ -992,10 +1106,12 @@ def _build_receipt(
             "arenaCurrency": ARENA_CURRENCY,
             "paymentObservationGrantEligible": False,
             "fixtureBoundary": fixture["boundary"],
+            "fixtureRailIdentity": identity,
             "expectedPaymentTerms": {
                 "boundary": "Arena-owned quoted terms; what was required, never evidence that it happened",
-                "network": expected["network"],
-                "mint": expected["mint"],
+                "network": network,
+                "caip2": identity["caip2"],
+                "mint": identity["mint"],
                 "payee": payee,
                 "amountBaseUnits": expected["amountBaseUnits"],
             },
@@ -1261,6 +1377,7 @@ def _scenario_fixture(scenario: str, fixture: dict) -> tuple[dict, dict | None]:
 
 def _payment_for_scenario(scenario: str, fixture: dict | None = None) -> dict:
     fixture = fixture if fixture is not None else load_payment_fixture()
+    _validate_fixture_rail_identity(fixture)
     case, replay_store = _scenario_fixture(scenario, fixture)
     if scenario == "authorization-denied":
         return _no_payment_attempt("authorization_denied", "policy denied before payment preparation; no payment observation exists")

@@ -1,6 +1,18 @@
 {
   "fixtureId": "arena-rap-assurance-audd-transfer-checked-v1",
   "boundary": "Deterministic parsed Solana devnet TransferChecked fixture for RAP Assurance preview. It is not a live RPC observation, not an official AUDD mint observation, not grant evidence, not custody, and not settlement finality.",
+  "railIdentity": {
+    "asset": "AUDD",
+    "environment": "deterministic-fixture",
+    "status": "deterministic-fixture-only",
+    "networkAlias": "solana-devnet",
+    "caip2": "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1",
+    "mint": "AUDDdev111111111111111111111111111111111111",
+    "tokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+    "decimals": 6,
+    "grantEligibility": "non_eligible",
+    "evidenceEnvironment": "deterministic-fixture"
+  },
   "railEnvironment": "deterministic-fixture",
   "railStatus": "deterministic-fixture-only",
   "grantEligibility": "non_eligible",
