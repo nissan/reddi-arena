@@ -1788,6 +1788,53 @@ check("a self-custodial fixture still serves the scenarios it can construct",
       _preview_outcome(_self_custodial, "valid-receipt")["adapters"]["receiptIntegrity"][
           "result"]["decision"] == "accept")
 
+# A decoy transfer ahead of the paying one must not absorb the mutation: the
+# scenario has to break the transfer the observer would otherwise accept, and
+# still refuse with its own canonical reason.
+def _with_decoy_transfer(fixture):
+    _msg = fixture["parsedTransaction"]["transaction"]["message"]
+    _msg["accountKeys"] = _msg["accountKeys"] + ["decoy-source-token-account", "decoy-dest-token-account"]
+    _msg["instructions"].insert(0, {
+        "programId": fixture["expected"]["tokenProgram"], "program": "spl-token",
+        "parsed": {"type": "transferChecked", "info": {
+            "source": "decoy-source-token-account", "destination": "decoy-dest-token-account",
+            "mint": "DecoyMint111111111111111111111111111111111",
+            "authority": "decoy-authority",
+            "tokenAmount": {"amount": "1", "decimals": 6, "uiAmountString": "0.000001"}}}})
+    fixture["parsedTransaction"]["meta"]["postTokenBalances"].append({
+        "accountIndex": len(_msg["accountKeys"]) - 1,
+        "mint": "DecoyMint111111111111111111111111111111111", "owner": "decoy-owner",
+        "programId": fixture["expected"]["tokenProgram"],
+        "uiTokenAmount": {"amount": "1", "decimals": 6, "uiAmountString": "0.000001"}})
+    return fixture
+
+for _case, _reason in assurance.SCENARIO_REFUSAL_REASON.items():
+    _decoyed = _preview_outcome(_with_decoy_transfer(_json_ass.loads(_good_fixture_text)), _case)
+    check(f"{_case} breaks the paying transfer, not a decoy ahead of it",
+          _decoyed != "integrity" and not isinstance(_decoyed, str)
+          and _decoyed["adapters"]["paymentObservation"]["result"]["reason"] == _reason
+          and _decoyed["adapters"]["receiptIntegrity"]["result"]["decision"] == "reject"
+          and _decoyed["settlement"]["decision"] == "blocked"
+          and _decoyed["receiptArtifact"]["kind"] == "invalid-candidate")
+check("a decoy fixture still accepts the scenario that needs no mutation",
+      _preview_outcome(_with_decoy_transfer(_json_ass.loads(_good_fixture_text)),
+                       "valid-receipt")["adapters"]["receiptIntegrity"]["result"]["decision"]
+      == "accept")
+# Two transfers that both satisfy the expected terms leave no single target.
+_ambiguous = _json_ass.loads(_good_fixture_text)
+_amb_msg = _ambiguous["parsedTransaction"]["transaction"]["message"]
+_amb_msg["instructions"].insert(0, _json_ass.loads(_json_ass.dumps(_amb_msg["instructions"][0])))
+check("an ambiguous fixture with two paying transfers refuses instead of guessing",
+      _preview_outcome(_ambiguous, "wrong-mint") == "integrity")
+
+# A transfer instruction with no destination account cannot have its balance
+# resolved; a null destination must never match a null-keyed balance entry.
+_no_dest = _json_ass.loads(_good_fixture_text)
+del _no_dest["parsedTransaction"]["transaction"]["message"]["instructions"][0]["parsed"]["info"]["destination"]
+_no_dest["parsedTransaction"]["meta"]["postTokenBalances"][0]["accountIndex"] = "1"
+check("a transfer with no destination account is a fixture integrity fault",
+      _fixture_load_outcome(_json_ass.dumps(_no_dest)) == "integrity")
+
 # Scenario construction reaches into parsedTransaction, so a shape defect there
 # must surface as an integrity fault, not a TypeError/IndexError that escapes
 # both /api/assurance handlers and kills the request with no HTTP response.
@@ -1954,21 +2001,23 @@ check("a fixture changed mid-request cannot alter the committed bundle",
       _once["receipt"] == _valid["receipt"]
       and "9999999" not in _json_ass.dumps(_once))
 
-# The structural ten-layer walk is computed once and shared with the artifact
-# classifier rather than recomputed per request.
-_real_layers = assurance._validate_receipt_layers
-_layer_passes = []
-def _counting_layers(receipt):
-    _layer_passes.append(1)
-    return _real_layers(receipt)
-try:
-    assurance._validate_receipt_layers = _counting_layers
-    _single = assurance.build_assurance_preview(DEF, RAID, scenario="wrong-mint", seed=2)
-finally:
-    assurance._validate_receipt_layers = _real_layers
-check("one preview request runs the structural layer pass exactly once",
-      len(_layer_passes) == 1
-      and _single["receiptArtifact"]["kind"] == "invalid-candidate")
+# The artifact classification and the public verdict must agree about which
+# receipts are structurally incomplete, for every scenario.
+_STRUCTURAL_CODES = (
+    {f"rap_receipt.{_cat}.required" for _cat in assurance.LAYER_CATEGORY.values()}
+    | {f"rap_receipt.{_cat}.invalid" for _cat in assurance.LAYER_CATEGORY.values()}
+    | set(assurance.MISSING_LAYER_CODES.values())
+    | {"rap_receipt.envelope.required"}
+) - assurance.HOLD_CODES
+for _case in _assurance_cases:
+    _b = assurance.build_assurance_preview(DEF, RAID, scenario=_case, seed=2)
+    if _b["receipt"] is None:
+        continue
+    _verdict = assurance.validate_assurance(
+        _b["receipt"], _b["trace"], assurance._payment_for_scenario(_case))
+    _has_structural = bool({d["code"] for d in _verdict["diagnostics"]} & _STRUCTURAL_CODES)
+    check(f"{_case} artifact classification agrees with the public verdict's structural view",
+          _has_structural == (_b["receiptArtifact"]["kind"] == "invalid-candidate"))
 _dup = assurance.build_assurance_preview(DEF, RAID, scenario="duplicate-replay", seed=2)
 check("duplicate-replay keeps the first observation's real settlement and rejects on replay",
       _dup["receipt"]["settlementProgramProof"]["confirmationStatus"] == "confirmed"

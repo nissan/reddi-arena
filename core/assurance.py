@@ -115,6 +115,9 @@ CANONICAL_OBSERVATION_FAILURE_REASONS = frozenset(
 # (packages/agent-protocol/src/payment-records.ts) so it stays comparable.
 ARENA_PREVIEW_LABELS_VERSION = "reddi.arena.devnet-preview-labels.v1"
 
+# The canonical observation failure each mutating refusal scenario must produce.
+SCENARIO_REFUSAL_REASON = {"wrong-mint": "wrong_mint", "wrong-payee": "wrong_payee"}
+
 REQUIRED_FIXTURE_KEYS = ("fixtureId", "boundary", "expected", "parsedTransaction")
 REQUIRED_FIXTURE_EXPECTED_KEYS = (
     "network", "signature", "mint", "tokenProgram", "payTo", "amountBaseUnits", "authority",
@@ -399,11 +402,50 @@ def _transfer_instruction_info(parsed: dict) -> dict:
 
 def _destination_balance(parsed: dict, info: dict) -> dict:
     destination = _string(info.get("destination"))
+    if destination is None:
+        raise AssuranceIntegrityError(
+            "preview fixture transfer instruction names no destination token account")
     for item in _as_list(_get_path(parsed, "meta", "postTokenBalances")):
-        if isinstance(item, dict) and _account_key_at(parsed, item.get("accountIndex")) == destination:
+        if not isinstance(item, dict):
+            continue
+        account = _account_key_at(parsed, item.get("accountIndex"))
+        if account is not None and account == destination:
             return item
     raise AssuranceIntegrityError(
         "preview fixture has no meta.postTokenBalances entry for the transfer destination account")
+
+
+def _paying_instruction_info(parsed: dict, expected: dict) -> dict:
+    """The one transfer that satisfies the expected terms — the one an observer accepts.
+
+    Breaking any other transfer would leave the paying one intact, so the
+    scenario would present a verifiable payment under a refusal card.
+    """
+    matches = []
+    for item in _collect_instructions(parsed):
+        if not _is_transfer_checked(item["instruction"]):
+            continue
+        info = _get_path(item["instruction"], "parsed", "info")
+        if isinstance(info, dict) and _candidate_matches(_candidate(parsed, item, expected), expected):
+            matches.append(info)
+    if len(matches) != 1:
+        raise AssuranceIntegrityError(
+            "preview scenario needs exactly one TransferChecked instruction satisfying the expected "
+            f"payment terms to break; found {len(matches)}")
+    return matches[0]
+
+
+def _assert_scenario_refuses(scenario: str, parsed: dict, expected: dict) -> None:
+    """Prove the mutated fixture actually produces the refusal the scenario claims."""
+    reason = SCENARIO_REFUSAL_REASON.get(scenario)
+    if reason is None:
+        return
+    outcome = verify_spl_transfer_checked_fixture(parsed, expected)
+    if outcome.get("ok") or outcome.get("reason") != reason:
+        got = "an accepted observation" if outcome.get("ok") else outcome.get("reason")
+        raise AssuranceIntegrityError(
+            f"preview scenario {scenario} must observe {reason} after its mutation but got {got}; "
+            "refusing rather than presenting the opposite verdict")
 
 
 def _break_field(container: dict, key: str, value: Any, what: str) -> None:
@@ -1186,15 +1228,16 @@ def _scenario_fixture(scenario: str, fixture: dict) -> tuple[dict, dict | None]:
     replay_store = None
     if scenario == "wrong-mint":
         wrong = "WrongAuddMint1111111111111111111111111111111"
-        info = _transfer_instruction_info(parsed)
+        info = _paying_instruction_info(parsed, expected)
         _break_field(info, "mint", wrong, "transfer instruction mint")
         _break_field(_destination_balance(parsed, info), "mint", wrong, "destination token balance mint")
     elif scenario == "wrong-payee":
-        info = _transfer_instruction_info(parsed)
+        info = _paying_instruction_info(parsed, expected)
         _break_field(_destination_balance(parsed, info), "owner", expected["authority"],
                      "destination token account owner")
     elif scenario == "duplicate-replay":
         replay_store = ReplayStore()
+    _assert_scenario_refuses(scenario, parsed, expected)
     return {"expected": expected, "parsedTransaction": parsed}, replay_store
 
 

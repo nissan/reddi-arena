@@ -104,12 +104,17 @@ destination account). Each failure raises `AssuranceIntegrityError`, which
 line. Only malformed client input (an unknown or non-string `scenario`) is
 a 400.
 
-The refusal scenarios locate their mutation targets semantically rather than by
-position, and each mutation must actually change the document. If a contributed
-fixture already holds the value a scenario needs to break — a self-custodial
-fixture whose payer already owns the destination, say — the scenario refuses as
-an integrity fault rather than presenting an untouched, verifiable payment
-under a "wrong mint" or "wrong payee" card.
+The refusal scenarios break the one transfer that satisfies the expected
+payment terms — the transfer an observer would otherwise accept — located
+semantically rather than by position, so a decoy transfer earlier in the
+transaction cannot absorb the mutation. Each scenario then re-observes its own
+mutated fixture and requires the intended canonical refusal
+(`wrong_mint`, `wrong_payee`) before serving it. If a contributed fixture
+cannot demonstrate its refusal — it already holds the value the scenario needs
+to break, it offers no single transfer matching the expected terms, or the
+mutation fails to change the verdict — the scenario refuses as an integrity
+fault rather than presenting a verifiable payment under a "wrong mint" or
+"wrong payee" card.
 
 When a payment *was* observed, `replayIdempotency.idempotencyKey` extends the
 verifier's own consume-once replay key — network, signature, and the exact
