@@ -112,11 +112,13 @@ required top-level keys, its expected-terms keys, the base-unit amount, and the
 `TransferChecked` instruction and the `postTokenBalances` entry for its
 destination account). Each failure raises `AssuranceIntegrityError`, which
 `/api/assurance` answers with a sanitized 500 plus a bounded server-side log
-line. Only caller error is a 400: an unknown or non-string `scenario`, an
-unknown bot, hire or weight class, or a request that asks the preview to leave
-its boundary (`network` other than `solana-devnet`, a `paymentMode` other than
-fixture/dry-run, or a truthy `wallet`, `sign`, `submit`, `rpc`, `custody` or
-`externalDeployment` field).
+line. Only caller error is a 400: a body that is not a top-level JSON object
+(rejected for every POST route immediately after parsing, before any field is
+read), an unknown or non-string `scenario`, an unknown bot, hire or weight
+class, or a request that asks the preview to leave its boundary (`network`
+other than `solana-devnet`, a `paymentMode` other than fixture/dry-run, or a
+truthy `wallet`, `sign`, `submit`, `rpc`, `custody` or `externalDeployment`
+field).
 
 The refusal scenarios break the one transfer that satisfies the expected
 payment terms — the transfer an observer would otherwise accept — located

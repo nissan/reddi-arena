@@ -67,7 +67,8 @@ python3 tools/validate_adl.py          # schema gate against pinned v0.2
 python3 tools/simulate.py --seeds 200  # balance sweep; regen BALANCE-REPORT if engine changed
 python3 tools/graph_lint.py            # graph invariants G1-G7 + READY frontier
 python3 tools/plan_lint.py             # legacy plan invariants L1-L7 (backlog.yaml)
-python3 tools/generate_prompts.py      # regenerate spdd/ + github/ from backlog.yaml
+python3 tools/generate_prompts.py      # fresh seed only — a full run overwrites hand-kept
+                                       # Sync Logs; see its docstring for migration mode
 python3 web/server.py 8000             # / = landing, /play = arena app
 python3 cli/arena.py --help
 ```
