@@ -208,6 +208,7 @@ action with its own reviewed messaging, and selecting `hosted` needs that
 approval explicitly, because enabling the preview on an externally hosted
 service exposes it publicly — the "externally hosted launch" that stays
 separately approval-gated.
+
 Every other boundary in the table above still holds when the preview is on — it
 remains fixture-only, with no wallet, RPC, signing, submission, or custody path
 — so enabling it exposes the preview, never live value.
