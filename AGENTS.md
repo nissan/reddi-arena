@@ -100,7 +100,8 @@ python3 cli/arena.py --help
 ## Current scope (docs/REVISED-RECOMMENDATION.md)
 
 Phases P2–P4 are **parked** behind the 2026-08-31 lab launch; F1/F2 **struck**.
-The active surface is: the playable preview (built), balance upkeep, spec
+The active surface is: the playable preview (built) including the local Solana
+Devnet Preview (`docs/DEVNET-PREVIEW-RAP-ASSURANCE.md`), balance upkeep, spec
 findings (F-007/F-009 filed upstream), and the vault-duel tutorial. Check an
 issue's `status:` label before starting it.
 

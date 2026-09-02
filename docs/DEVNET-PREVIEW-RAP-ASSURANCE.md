@@ -77,12 +77,13 @@ labels it with that classification:
 | `invalid-candidate` | No verified observation or canonically incomplete layers |
 | `not-emitted` | Denied before payment; no candidate exists |
 
-When the payment observation does not verify, the artifact is an
+When no verified observation exists at all — a replay rejection still carries
+its real first observation, so it keeps its evidence — the artifact is an
 `invalid-candidate`. Every evidence field that would have to be *observed* is
-absent rather than restated from the expected terms: `settlementProgramProof`
-omits each observable field, `paymentEvidence.payee` / `.amount` and
-`payment.paymentProofRef` / `payment.amount` are null, and
-`replayIdempotency.idempotencyKey` is absent. The canonical
+withheld rather than restated from the expected terms: `settlementProgramProof`
+omits each observable field, and `paymentEvidence.payee` / `.amount`,
+`payment.paymentProofRef` / `payment.amount` and
+`replayIdempotency.idempotencyKey` are null. The canonical
 `rap_receipt.payment.invalid`, `.settlement.invalid` and `.replay.invalid`
 diagnostics then report incomplete evidence, and that same structural pass is
 what classifies the artifact. Semantic cross-checks never run on an incomplete
@@ -101,8 +102,11 @@ required top-level keys, its expected-terms keys, the base-unit amount, and the
 `TransferChecked` instruction and the `postTokenBalances` entry for its
 destination account). Each failure raises `AssuranceIntegrityError`, which
 `/api/assurance` answers with a sanitized 500 plus a bounded server-side log
-line. Only malformed client input (an unknown or non-string `scenario`) is
-a 400.
+line. Only caller error is a 400: an unknown or non-string `scenario`, an
+unknown bot, hire or weight class, or a request that asks the preview to leave
+its boundary (`network` other than `solana-devnet`, a `paymentMode` other than
+fixture/dry-run, or a truthy `wallet`, `sign`, `submit`, `rpc`, `custody` or
+`externalDeployment` field).
 
 The refusal scenarios break the one transfer that satisfies the expected
 payment terms — the transfer an observer would otherwise accept — located

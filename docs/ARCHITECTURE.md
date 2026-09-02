@@ -105,10 +105,11 @@ one-line change.
 
 ## Testing
 
-`tests/test_arena.py` — 49 checks across determinism, draft rules, power-up
-effect, boundary invariants, chain payloads, tamper detection, and balance
-regression. The tamper tests matter most: they prove the rehearsal validator
-rejects malformed payloads rather than rubber-stamping them.
+`tests/test_arena.py` — the single suite gate (see `AGENTS.md` for the current
+check count), across determinism, draft rules, power-up effect, boundary
+invariants, chain payloads, RAP Assurance preview refusals, tamper detection,
+and balance regression. The tamper tests matter most: they prove the rehearsal
+validator rejects malformed payloads rather than rubber-stamping them.
 
 `tools/simulate.py --seeds 200` — the full balance sweep. Run it after any
 engine change and regenerate `docs/BALANCE-REPORT.md`.

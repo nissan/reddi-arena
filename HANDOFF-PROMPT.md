@@ -10,7 +10,7 @@ Reddi Agent Protocol (RAP) and ADL v0.2. The codebase in this directory is
 complete and verified: 55 tests pass, the balance report is published, and the
 web app serves a marketing landing page at `/` and the arena at `/play`.
 
-**Read `CLAUDE.md` in full before doing anything.** It defines the methodology
+**Read `AGENTS.md` in full before doing anything.** It defines the methodology
 (SPDD: one GitHub issue per work loop, each bound to a REASONS-LITE artifact in
 `spdd/prompt/`) and the hard boundaries (dry-run rail only, one-way spec
 canonicality, no `*_packet`/`*_gate` scripts, claims discipline, determinism).

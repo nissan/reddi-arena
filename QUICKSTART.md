@@ -62,7 +62,7 @@ shape for sellers), **On-Chain** (the Solana projection).
 ```bash
 python3 tools/simulate.py --seeds 200   # balance sweep -> docs/BALANCE-REPORT.md
 python3 tools/rehearse.py       # localnet rehearsal preflight (starts nothing)
-python3 tests/test_arena.py     # 51 checks: determinism, draft rule, power-up effect, boundaries
+python3 tests/test_arena.py     # whole suite: determinism, draft rules, boundaries, Devnet Preview refusals
 python3 tools/validate_adl.py   # all fighters validate against the pinned ADL v0.2 schema
 ```
 
@@ -77,6 +77,7 @@ python3 tools/validate_adl.py   # all fighters validate against the pinned ADL v
 | `docs/WEIGHT-CLASS-v0.1.md` | The AU formula |
 | `docs/BALANCE-REPORT.md` | Published balance data |
 | `docs/BLOCKCHAIN-INTEGRATION-ASSESSMENT.md` | Solana/AUDD/x402/identity mapping |
+| `docs/DEVNET-PREVIEW-RAP-ASSURANCE.md` | The Devnet Preview tab — scenarios, boundaries, fixture contributions |
 | `docs/FINDINGS.md` | Spec findings filed upstream |
 
 ## Two roles
