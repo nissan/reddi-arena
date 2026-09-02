@@ -525,6 +525,8 @@ class Handler(BaseHTTPRequestHandler):
                 if req.get(flag):
                     return self._send({"error": f"{flag} is blocked in the local Devnet Preview"}, 400)
             scenario = req.get("scenario") or "valid-receipt"
+            if not isinstance(scenario, str) or scenario not in assurance.SCENARIOS:
+                return self._send({"error": "unknown scenario"}, 400)
             try:
                 seed = self._seed(req, 2)
                 a = self._load_bot(req.get("botA"))

@@ -28,6 +28,14 @@ uses existing boundaries:
 | Receipt-integrity diagnostics | `reddinft/reddiagent-lab/scripts/rap_receipt_validator.py` taxonomy |
 | x402/Solana `TransferChecked` observation semantics | `nissan/reddi-agent-protocol/packages/x402-solana/src/spl-token-observer.ts` |
 | Solana devnet program metadata | `core/chain.py` projection constants |
+| AUDD rail identity, policy reason codes | `nissan/reddi-agent-protocol/packages/agent-protocol/src/audd-rail-config.ts`, `.../policy.ts` |
+
+The payment fixture uses the canonical `AUDD_DETERMINISTIC_FIXTURE_MINT`
+sentinel (`AUDDdev111111111111111111111111111111111111`) on the
+`deterministic-fixture` rail, which is `non_eligible` for grant volume. The
+official AUDD mainnet mint is never a fixture value: `load_payment_fixture()`
+and the fixture verifier both refuse it. `policyDecision.reasonCodes` only ever
+carry codes from the closed canonical `ReddiPolicyReasonCode` set.
 
 If those upstream interfaces change, Arena should update this adapter or file a
 finding upstream. It should not silently invent a competing receipt contract.
@@ -45,6 +53,12 @@ The preview catalog is returned by `GET /api/assurance/scenarios`.
 | `duplicate-replay` | rejected; replay store and receipt idempotency detect reuse |
 | `refund-gate-failed` | rejected for reputation/payout; projected settlement refund |
 | `authorization-denied` | blocked before payment; no receipt is emitted |
+
+When the payment observation does not verify, the receipt's
+`settlementProgramProof` reports `unobserved` fields and an `unverified`
+confirmation rather than restating the expected transfer, so the canonical
+`rap_receipt.settlement.unconfirmed` / `.payee_mismatch` diagnostics fire on the
+receipt itself and not only on the payment adapter.
 
 ## What is simulated, read-only, blocked, or approval-gated
 

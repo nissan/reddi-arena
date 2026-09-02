@@ -1,10 +1,15 @@
 {
   "fixtureId": "arena-rap-assurance-audd-transfer-checked-v1",
   "boundary": "Deterministic parsed Solana devnet TransferChecked fixture for RAP Assurance preview. It is not a live RPC observation, not an official AUDD mint observation, not grant evidence, not custody, and not settlement finality.",
+  "railEnvironment": "deterministic-fixture",
+  "railStatus": "deterministic-fixture-only",
+  "grantEligibility": "non_eligible",
+  "evidenceEnvironment": "deterministic-fixture",
+  "mintLabel": "AUDD_DETERMINISTIC_FIXTURE_MINT sentinel from the canonical AUDD rail config; never an official or devnet AUDD mint",
   "expected": {
     "network": "solana-devnet",
     "signature": "fixtureAuddTransferCheckedSignature1111111111111111",
-    "mint": "AUDDttiEpCydTm7joUMbYddm72jAWXZnCpPZtDoxqBSw",
+    "mint": "AUDDdev111111111111111111111111111111111111",
     "tokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
     "payTo": "3mL7kbtz3eK24vJ6wftjnLvhZrf93B71UEjB2DBDAddr",
     "amountBaseUnits": "2500000",
@@ -23,7 +28,7 @@
       "postTokenBalances": [
         {
           "accountIndex": 1,
-          "mint": "AUDDttiEpCydTm7joUMbYddm72jAWXZnCpPZtDoxqBSw",
+          "mint": "AUDDdev111111111111111111111111111111111111",
           "owner": "3mL7kbtz3eK24vJ6wftjnLvhZrf93B71UEjB2DBDAddr",
           "programId": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
           "uiTokenAmount": {
@@ -51,7 +56,7 @@
               "info": {
                 "source": "source-audd-token-account-fixture",
                 "destination": "destination-audd-token-account-fixture",
-                "mint": "AUDDttiEpCydTm7joUMbYddm72jAWXZnCpPZtDoxqBSw",
+                "mint": "AUDDdev111111111111111111111111111111111111",
                 "authority": "6uiQbwMor4UrWYiDtAJcgHKYW4vUaM3BUVChPgzdALse",
                 "tokenAmount": {
                   "amount": "2500000",

@@ -25,7 +25,14 @@ from pathlib import Path
 from typing import Any
 
 from core import chain
-from core.arena import ARENA_CURRENCY, ARENA_RAIL, run_vault_match, weigh_competitor
+from core.arena import (
+    ARENA_CURRENCY,
+    ARENA_RAIL,
+    _canon,
+    _hash,
+    run_vault_match,
+    weigh_competitor,
+)
 
 ROOT = Path(__file__).resolve().parent.parent
 FIXTURE_PATH = ROOT / "fixtures" / "assurance" / "audd-transfer-checked.json"
@@ -37,6 +44,48 @@ SPL_OBSERVER_VERSION = "reddi.x402-solana.spl-transfer-checked-observer.v1"
 PREVIEW_FORMAT_VERSION = "reddi.arena.rap-assurance-preview.v1"
 FINALIZED_AT = "2026-08-31T00:00:00Z"
 SPL_MEMO_PROGRAM_ID = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"
+
+# Mirrors the canonical AUDD rail config's `deterministic-fixture` environment
+# (packages/agent-protocol/src/audd-rail-config.ts). The sentinel mint must
+# never be presented as an official or devnet AUDD mint, so the official
+# mainnet mint is recorded here only as a value this preview refuses.
+AUDD_DETERMINISTIC_FIXTURE_MINT = "AUDDdev111111111111111111111111111111111111"
+AUDD_OFFICIAL_SOLANA_MAINNET_MINT = "AUDDttiEpCydTm7joUMbYddm72jAWXZnCpPZtDoxqBSw"
+AUDD_FIXTURE_RAIL = {
+    "environment": "deterministic-fixture",
+    "status": "deterministic-fixture-only",
+    "mint": AUDD_DETERMINISTIC_FIXTURE_MINT,
+    "grantEligibility": "non_eligible",
+    "evidenceEnvironment": "deterministic-fixture",
+}
+
+# Closed set from ReddiPolicyReasonCode / ReddiPolicyApprovalState in
+# nissan/reddi-agent-protocol/packages/agent-protocol/src/policy.ts. A
+# reddi.policy-decision.v1 document may only carry codes from this set.
+CANONICAL_POLICY_REASON_CODES = frozenset(
+    {
+        "allowed",
+        "budget_policy_missing",
+        "invalid_quote",
+        "malformed_limit",
+        "request_amount_exceeds_limit",
+        "session_budget_exceeded",
+        "source_budget_exceeded",
+        "specialist_budget_exceeded",
+        "asset_network_budget_exceeded",
+        "call_count_exceeded",
+        "unsupported_asset_network",
+        "operator_denied",
+        "operator_approval_required",
+        "payment_proof_missing",
+        "unsupported_network_asset",
+        "malformed_receipt",
+        "credential_leakage_rejected",
+    }
+)
+CANONICAL_POLICY_APPROVAL_STATES = frozenset({"approved", "denied", "requires_operator_approval"})
+
+UNOBSERVED = "unobserved"
 
 CANONICAL_REFS = {
     "adl": "vendor/ADL-v0.2.schema.json (pinned from reddiagent-lab)",
@@ -184,6 +233,29 @@ REQUIRED_LAYER_FIELDS: dict[str, tuple[str, ...]] = {
     "rollbackHold": ("holdState", "rollbackRequired"),
 }
 
+# The canonical validator keys diagnostics by evidence *category*, not by layer
+# name, with three missing-layer overrides. Ported verbatim so preview
+# diagnostics match the taxonomy consumers already parse.
+LAYER_CATEGORY = {
+    "delegatedAuthority": "authority",
+    "resourceAuthorization": "resource",
+    "paymentEvidence": "payment",
+    "settlementProgramProof": "settlement",
+    "serviceOutcome": "service",
+    "evalEvidence": "eval",
+    "replayIdempotency": "replay",
+    "privacyAccounting": "accounting",
+    "disputeState": "dispute",
+    "rollbackHold": "rollback",
+}
+
+MISSING_LAYER_CODES = {
+    "serviceOutcome": "rap_receipt.service_outcome.required",
+    "paymentEvidence": "rap_receipt.payment.required",
+    # Distinct from rap_receipt.rollback.required, which is an active hold state.
+    "rollbackHold": "rap_receipt.rollback.evidence_required",
+}
+
 HOLD_CODES = frozenset(
     {
         "rap_receipt.service.failed_after_payment",
@@ -224,19 +296,17 @@ def scenario_catalog() -> dict:
 
 
 def load_payment_fixture() -> dict:
-    return json.loads(FIXTURE_PATH.read_text())
-
-
-def _canon(obj: Any) -> str:
-    return json.dumps(obj, sort_keys=True, separators=(",", ":"))
+    fixture = json.loads(FIXTURE_PATH.read_text())
+    if AUDD_OFFICIAL_SOLANA_MAINNET_MINT in json.dumps(fixture):
+        raise ValueError(
+            "Devnet preview fixtures must never carry the official AUDD mainnet mint; "
+            f"use {AUDD_DETERMINISTIC_FIXTURE_MINT}"
+        )
+    return fixture
 
 
 def _sha256_text(text: str) -> str:
     return hashlib.sha256(text.encode()).hexdigest()
-
-
-def _hash(obj: Any) -> str:
-    return "sha256:" + _sha256_text(_canon(obj))
 
 
 def _trace_hash(trace: dict) -> str:
@@ -472,6 +542,13 @@ def _validate_expected(expected: dict, commitment: str) -> dict | None:
         return _payment_failure("malformed_expected_payment", "expected payment terms are incomplete")
     if not expected["amountBaseUnits"].isdigit() or expected["amountBaseUnits"].startswith("0"):
         return _payment_failure("malformed_expected_payment", "expected amount must be a positive integer base-unit string")
+    if AUDD_OFFICIAL_SOLANA_MAINNET_MINT in (expected["mint"], expected.get("tokenProgram")):
+        return _payment_failure(
+            "official_mint_blocked",
+            "the official AUDD mainnet mint may never be observed by the fixture-only Devnet Preview",
+            AUDD_DETERMINISTIC_FIXTURE_MINT,
+            expected["mint"],
+        )
     if commitment not in ("confirmed", "finalized"):
         return _payment_failure("missing_confirmation_metadata", "commitment must be confirmed or finalized")
     return None
@@ -559,6 +636,10 @@ def verify_spl_transfer_checked_fixture(
             "evidence": {
                 "source": "parsed-transaction-fixture",
                 "grantEligible": False,
+                "railEnvironment": AUDD_FIXTURE_RAIL["environment"],
+                "railStatus": AUDD_FIXTURE_RAIL["status"],
+                "grantEligibility": AUDD_FIXTURE_RAIL["grantEligibility"],
+                "evidenceEnvironment": AUDD_FIXTURE_RAIL["evidenceEnvironment"],
             },
         },
         "replayKey": replay_key,
@@ -566,6 +647,12 @@ def verify_spl_transfer_checked_fixture(
 
 
 def _policy_decision(allowed: bool, reason_codes: list[str], quote: dict | None = None) -> dict:
+    unknown = sorted(code for code in reason_codes if code not in CANONICAL_POLICY_REASON_CODES)
+    if unknown:
+        raise ValueError(
+            f"{RAP_POLICY_DECISION_SCHEMA_VERSION} reasonCodes must come from the canonical closed set; "
+            f"got {', '.join(unknown)}"
+        )
     return {
         "schemaVersion": RAP_POLICY_DECISION_SCHEMA_VERSION,
         "allowed": allowed,
@@ -579,7 +666,7 @@ def _policy_decision(allowed: bool, reason_codes: list[str], quote: dict | None 
             "fixture-only local preview; no wallet, RPC, signing, custody, or transaction submission",
             "payments prove transfer metadata; RAP Assurance requires authority, resource authorization, work evidence, eval, attestation, replay, accounting, dispute, and hold layers",
         ] if allowed else [
-            "delegated authority does not cover the requested Arena fixture; payment preparation stops before any payment proof exists"
+            "operator_denied: delegated authority does not cover the requested Arena fixture; payment preparation stops before any payment proof exists"
         ],
     }
 
@@ -603,6 +690,37 @@ def _request_envelope(trace: dict, scenario: str) -> dict:
     }
 
 
+def _settlement_proof(expected: dict, observation: dict, amount: int) -> dict:
+    """Settlement proof bound to the payment observation, never to expectations.
+
+    Without a verified observation there is nothing settled to prove, so the
+    observed fields read `unobserved` and the confirmation reads `unverified`.
+    That keeps the layer structurally present while the canonical
+    `rap_receipt.settlement.unconfirmed` / `.payee_mismatch` diagnostics fire.
+    """
+    if not observation:
+        return {
+            "cluster": "solana-devnet fixture",
+            "signature": UNOBSERVED,
+            "mint": UNOBSERVED,
+            "programId": expected["tokenProgram"],
+            "confirmationStatus": "unverified",
+            "payer": UNOBSERVED,
+            "payee": UNOBSERVED,
+            "amount": amount,
+        }
+    return {
+        "cluster": "solana-devnet fixture",
+        "signature": f"fixture:{observation['signature']}:{observation['instructionIndex']}",
+        "mint": observation["mint"],
+        "programId": observation["tokenProgram"],
+        "confirmationStatus": observation["commitment"],
+        "payer": observation["authority"],
+        "payee": observation["destinationOwner"],
+        "amount": int(observation["amountBaseUnits"]),
+    }
+
+
 def _build_receipt(
     trace: dict,
     payment_result: dict,
@@ -613,7 +731,13 @@ def _build_receipt(
 ) -> dict:
     fixture = load_payment_fixture()
     expected = fixture["expected"]
-    observation = payment_result.get("observation") if payment_result.get("ok") else {}
+    # A replay rejection still had a real first observation; every other failure
+    # has none, and the settlement proof below must not invent one.
+    observation = _as_dict(
+        payment_result.get("observation")
+        if payment_result.get("ok")
+        else _as_dict(payment_result.get("firstAttempt")).get("observation")
+    )
     amount = int(expected["amountBaseUnits"])
     payer = expected["authority"]
     payee = expected["payTo"]
@@ -623,13 +747,14 @@ def _build_receipt(
     response_hash = trace["traceHash"]
     eval_report_hash = _hash({"gate": "vault-trace-determinism", "traceHash": response_hash, "status": eval_status})
     payment_response_hash = _hash({
-        "signature": expected["signature"],
-        "instructionIndex": observation.get("instructionIndex", "0"),
-        "amount": expected["amountBaseUnits"],
-        "mint": expected["mint"],
-        "payee": payee,
+        "signature": observation.get("signature", UNOBSERVED),
+        "instructionIndex": observation.get("instructionIndex", UNOBSERVED),
+        "amount": observation.get("amountBaseUnits", UNOBSERVED),
+        "mint": observation.get("mint", UNOBSERVED),
+        "payee": observation.get("destinationOwner", UNOBSERVED),
     })
-    settlement_signature = f"fixture:{expected['signature']}:{observation.get('instructionIndex', '0')}"
+    settlement = _settlement_proof(expected, observation, amount)
+    settlement_signature = settlement["signature"]
     quote = {
         "amount": expected["amountBaseUnits"],
         "asset": "AUDD",
@@ -637,7 +762,7 @@ def _build_receipt(
         "source": "arena:vault-preview",
         "specialist": "arena:match-winner-or-referee",
     }
-    policy = _policy_decision(policy_allowed, ["fixture_policy_allow"] if policy_allowed else ["authority_scope_mismatch"], quote if policy_allowed else None)
+    policy = _policy_decision(policy_allowed, ["allowed"] if policy_allowed else ["operator_denied"], quote if policy_allowed else None)
     prior = [payment_response_hash] if duplicate_payment else []
     status = "attested" if eval_status == "pass" else "failed"
 
@@ -696,16 +821,7 @@ def _build_receipt(
             "amount": amount,
             "boundRequestId": request_id,
         },
-        "settlementProgramProof": {
-            "cluster": "solana-devnet fixture",
-            "signature": settlement_signature,
-            "mint": expected["mint"],
-            "programId": expected["tokenProgram"],
-            "confirmationStatus": "confirmed",
-            "payer": payer,
-            "payee": payee,
-            "amount": amount,
-        },
+        "settlementProgramProof": settlement,
         "serviceOutcome": {
             "requestHash": request["requestHash"],
             "responseHash": response_hash,
@@ -758,13 +874,15 @@ def _validate_receipt_layers(receipt: dict) -> list[dict]:
     if not isinstance(receipt.get("finalizedAt"), str) or not receipt.get("finalizedAt"):
         diagnostics.append(_diag("rap_receipt.envelope.required", "Receipt must carry finalizedAt.", "envelope", "receipt.finalizedAt"))
     for layer in REQUIRED_LAYERS:
+        category = LAYER_CATEGORY[layer]
         value = receipt.get(layer)
         if not isinstance(value, dict):
-            diagnostics.append(_diag(f"rap_receipt.{layer}.required", f"Evidence layer {layer} must be present.", layer, f"receipt.{layer}"))
+            code = MISSING_LAYER_CODES.get(layer, f"rap_receipt.{category}.required")
+            diagnostics.append(_diag(code, f"Evidence layer {layer} must be present.", category, f"receipt.{layer}"))
             continue
         missing = _missing(value, REQUIRED_LAYER_FIELDS[layer])
         if missing:
-            diagnostics.append(_diag(f"rap_receipt.{layer}.invalid", f"Evidence layer {layer} missing: {', '.join(missing)}.", layer, f"receipt.{layer}"))
+            diagnostics.append(_diag(f"rap_receipt.{category}.invalid", f"Evidence layer {layer} missing: {', '.join(missing)}.", category, f"receipt.{layer}"))
     return diagnostics
 
 
@@ -950,7 +1068,7 @@ def build_assurance_preview(
     duplicate = scenario == "duplicate-replay"
     receipt = None if scenario == "authorization-denied" else _build_receipt(
         trace,
-        payment_result if payment_result.get("ok") else {"ok": False},
+        payment_result,
         scenario,
         eval_status=eval_status,
         duplicate_payment=duplicate,
@@ -962,8 +1080,7 @@ def build_assurance_preview(
     attested = eval_status == "pass" and policy_allowed
     settlement = chain.settle_match(trace, gates_passed, attested, "fixture-operator", "arena-referee", 100_000_000)
     if assurance["decision"] != "accept" and scenario != "refund-gate-failed":
-        settlement = {
-            "mode": chain.PROJECTION_MODE,
+        settlement.update({
             "decision": "blocked",
             "instruction": "no_release",
             "reason": "RAP Assurance did not accept the combined payment/work evidence; no payout or reputation update is modeled",
@@ -971,8 +1088,7 @@ def build_assurance_preview(
                        "requiredGatesPassed": gates_passed,
                        "attestationConfirmed": attested,
                        "winner": trace.get("winner")},
-            "submitted": chain.NOT_SUBMITTED,
-        }
+        })
     if not policy_allowed:
         settlement.update({
             "instruction": "no_payment_prepared",

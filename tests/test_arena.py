@@ -1603,10 +1603,106 @@ check("valid assurance receipt uses canonical RAP receipt/policy versions",
       and _valid["receipt"]["policyDecision"]["schemaVersion"] == "reddi.policy-decision.v1")
 check("valid assurance payment observation is fixture-backed and never grant evidence",
       _valid["adapters"]["paymentObservation"]["result"]["observation"]["evidence"]
-      == {"source": "parsed-transaction-fixture", "grantEligible": False})
+      == {"source": "parsed-transaction-fixture", "grantEligible": False,
+          "railEnvironment": "deterministic-fixture",
+          "railStatus": "deterministic-fixture-only",
+          "grantEligibility": "non_eligible",
+          "evidenceEnvironment": "deterministic-fixture"})
 check("assurance preview explains payment transfer is not paid work proof",
       any(a["id"] == "rap-assurance-paid-work" and "Payment alone" in a["boundary"]
           for a in _valid["assertions"]))
+
+# The official AUDD mainnet mint is a gated verified-mainnet identity upstream.
+# A devnet fixture presenting it would be an unsupported AUDD claim, so it must
+# not survive anywhere in the preview and must be refused at load/verify time.
+check("devnet fixture pays with the canonical synthetic AUDD sentinel mint",
+      assurance.load_payment_fixture()["expected"]["mint"]
+      == assurance.AUDD_DETERMINISTIC_FIXTURE_MINT)
+import json as _json_ass
+check("no preview scenario surfaces the official AUDD mainnet mint",
+      all(assurance.AUDD_OFFICIAL_SOLANA_MAINNET_MINT
+          not in _json_ass.dumps(assurance.build_assurance_preview(DEF, RAID, scenario=_c, seed=2))
+          for _c in _assurance_cases))
+_official_expected = dict(assurance.load_payment_fixture()["expected"],
+                          mint=assurance.AUDD_OFFICIAL_SOLANA_MAINNET_MINT)
+_official = assurance.verify_spl_transfer_checked_fixture(
+    assurance.load_payment_fixture()["parsedTransaction"], _official_expected)
+check("fixture verifier refuses an expectation naming the official AUDD mainnet mint",
+      _official["ok"] is False and _official["reason"] == "official_mint_blocked")
+import tempfile as _tmp_ass
+_real_fixture_path = assurance.FIXTURE_PATH
+with _tmp_ass.NamedTemporaryFile("w", suffix=".json", delete=False) as _fh:
+    _fh.write(_real_fixture_path.read_text().replace(
+        assurance.AUDD_DETERMINISTIC_FIXTURE_MINT,
+        assurance.AUDD_OFFICIAL_SOLANA_MAINNET_MINT))
+    _bad_fixture_path = Path(_fh.name)
+try:
+    assurance.FIXTURE_PATH = _bad_fixture_path
+    try:
+        assurance.load_payment_fixture()
+        _fixture_refused = False
+    except ValueError:
+        _fixture_refused = True
+finally:
+    assurance.FIXTURE_PATH = _real_fixture_path
+    _bad_fixture_path.unlink()
+check("a contributed fixture carrying the official AUDD mainnet mint is refused",
+      _fixture_refused)
+
+# reddi.policy-decision.v1 reasonCodes are a closed upstream set
+# (packages/agent-protocol/src/policy.ts); an Arena-minted code is a malformed
+# receipt to any canonical validator.
+for _case in _assurance_cases:
+    _b = assurance.build_assurance_preview(DEF, RAID, scenario=_case, seed=2)
+    _policy = (_b["receipt"] or {}).get("policyDecision")
+    if _policy is None:
+        continue
+    check(f"policy decision for {_case} uses only canonical reason codes",
+          set(_policy["reasonCodes"]) <= assurance.CANONICAL_POLICY_REASON_CODES
+          and _policy["approvalState"] in assurance.CANONICAL_POLICY_APPROVAL_STATES
+          and _policy["approvalState"] == ("approved" if _policy["allowed"] else "denied"))
+try:
+    assurance._policy_decision(False, ["authority_scope_mismatch"])
+    _minted_ok = True
+except ValueError:
+    _minted_ok = False
+check("a non-canonical policy reason code is refused, not emitted", _minted_ok is False)
+
+# A failed payment observation must not yield a receipt asserting a confirmed
+# settlement of the very transfer the observer rejected.
+for _case in ("wrong-mint", "wrong-payee"):
+    _b = assurance.build_assurance_preview(DEF, RAID, scenario=_case, seed=2)
+    _proof = _b["receipt"]["settlementProgramProof"]
+    _seen = {d["code"] for d in _b["adapters"]["receiptIntegrity"]["result"]["diagnostics"]}
+    check(f"{_case} receipt reports an unverified settlement, not a confirmed one",
+          _proof["confirmationStatus"] == "unverified"
+          and _proof["mint"] == "unobserved" and _proof["payee"] == "unobserved"
+          and "rap_receipt.settlement.unconfirmed" in _seen
+          and "rap_receipt.settlement.payee_mismatch" in _seen)
+_dup = assurance.build_assurance_preview(DEF, RAID, scenario="duplicate-replay", seed=2)
+check("duplicate-replay keeps the first observation's real settlement and rejects on replay",
+      _dup["receipt"]["settlementProgramProof"]["confirmationStatus"] == "confirmed"
+      and _dup["receipt"]["settlementProgramProof"]["mint"] == assurance.AUDD_DETERMINISTIC_FIXTURE_MINT
+      and "rap_receipt.replay.duplicate_payment"
+      in {d["code"] for d in _dup["adapters"]["receiptIntegrity"]["result"]["diagnostics"]})
+
+# Missing-layer diagnostics are keyed by evidence category (with three
+# overrides), matching the canonical lab validator taxonomy consumers parse.
+_pay_ok, _ = assurance._payment_for_scenario("valid-receipt")
+for _layer, _code in (("delegatedAuthority", "rap_receipt.authority.required"),
+                      ("serviceOutcome", "rap_receipt.service_outcome.required"),
+                      ("paymentEvidence", "rap_receipt.payment.required"),
+                      ("rollbackHold", "rap_receipt.rollback.evidence_required")):
+    _stripped = {k: v for k, v in _valid["receipt"].items() if k != _layer}
+    _diags = assurance.validate_assurance(_stripped, _valid["trace"], _pay_ok)["diagnostics"]
+    check(f"a receipt missing {_layer} emits the canonical {_code} diagnostic",
+          _diags and any(d["code"] == _code for d in _diags))
+
+# One settlement response shape regardless of scenario, so a consumer of the
+# public endpoint never has to branch on decision.
+_settlement_keys = {frozenset(assurance.build_assurance_preview(DEF, RAID, scenario=_c, seed=2)["settlement"])
+                    for _c in _assurance_cases}
+check("every assurance scenario returns one stable settlement shape", len(_settlement_keys) == 1)
 
 print("balance regression (issue B7)")
 from tools.simulate import round_robin, mirror_position_bias, powerup_impact, BANDS, ARCHETYPES
@@ -1739,6 +1835,23 @@ _s, _b = _req("POST", "/api/assurance",
                "botB": "antweight-vault-raider.adl.yaml",
                "wallet": True})
 check("assurance API refuses wallet/signing escalation flags", _s == 400)
+for _case, (_decision, _settle, _codes) in _assurance_cases.items():
+    _s, _b = _req("POST", "/api/assurance",
+                  {"botA": "antweight-vault-defender.adl.yaml",
+                   "botB": "antweight-vault-raider.adl.yaml",
+                   "scenario": _case, "seed": 2})
+    check(f"assurance API serves scenario {_case} as {_decision}/{_settle}",
+          _s == 200 and _b["adapters"]["receiptIntegrity"]["result"]["decision"] == _decision
+          and _b["settlement"]["decision"] == _settle)
+# A non-string scenario must be a deterministic 400, not an unhandled TypeError
+# from the OrderedDict lookup that kills the request with no response.
+for _bad in ({"a": 1}, ["valid-receipt"], 7, True, "no-such-scenario"):
+    _s, _b = _req("POST", "/api/assurance",
+                  {"botA": "antweight-vault-defender.adl.yaml",
+                   "botB": "antweight-vault-raider.adl.yaml",
+                   "scenario": _bad})
+    check(f"assurance API rejects scenario {_bad!r} with a clean 400",
+          _s == 400 and "error" in _b)
 
 _s, _b = _req("POST", "/api/waitlist", {"email": "Player@Example.com", "roles": ["compete"]})
 check("waitlist signup works and normalizes case", _s == 200 and _b["ok"] and _b["position"] == 1)
