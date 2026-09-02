@@ -114,11 +114,18 @@ destination account). Each failure raises `AssuranceIntegrityError`, which
 `/api/assurance` answers with a sanitized 500 plus a bounded server-side log
 line. Only caller error is a 400: a body that is not a top-level JSON object
 (rejected for every POST route immediately after parsing, before any field is
-read), an unknown or non-string `scenario`, an unknown bot, hire or weight
+read), a malformed or unknown `scenario`, an unknown bot, hire or weight
 class, or a request that asks the preview to leave its boundary (`network`
 other than `solana-devnet`, a `paymentMode` other than fixture/dry-run, or a
 truthy `wallet`, `sign`, `submit`, `rpc`, `custody` or `externalDeployment`
 field).
+
+Scenario defaulting is absence-only: `valid-receipt` is selected when the
+`scenario` field is omitted entirely. A supplied value that is not a non-empty
+string — `null`, `false`, `true`, `0`, `""`, an array, an object, a number —
+is a 400 before any fixture lookup, so a malformed field can never be silently
+served (and labelled) as the valid receipt. A supplied unknown non-empty string
+stays the separate unknown-scenario 400.
 
 The refusal scenarios break the one transfer that satisfies the expected
 payment terms — the transfer an observer would otherwise accept — located
