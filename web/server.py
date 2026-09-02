@@ -619,8 +619,13 @@ class Handler(BaseHTTPRequestHandler):
             for flag in ("wallet", "sign", "submit", "rpc", "custody", "externalDeployment"):
                 if req.get(flag):
                     return self._send({"error": f"{flag} is blocked in the local Devnet Preview"}, 400)
-            scenario = req.get("scenario") or "valid-receipt"
-            if not isinstance(scenario, str) or scenario not in assurance.SCENARIOS:
+            if "scenario" in req:
+                scenario = req["scenario"]
+                if not isinstance(scenario, str) or not scenario:
+                    return self._send({"error": "scenario must be a non-empty string"}, 400)
+            else:
+                scenario = "valid-receipt"
+            if scenario not in assurance.SCENARIOS:
                 return self._send({"error": "unknown scenario"}, 400)
             try:
                 seed = self._seed(req, 2)

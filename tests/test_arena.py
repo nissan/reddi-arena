@@ -2363,15 +2363,38 @@ for _case, (_decision, _settle, _codes) in _assurance_cases.items():
     check(f"assurance API serves scenario {_case} as {_decision}/{_settle}",
           _s == 200 and _b["adapters"]["receiptIntegrity"]["result"]["decision"] == _decision
           and _b["settlement"]["decision"] == _settle)
-# A non-string scenario must be a deterministic 400, not an unhandled TypeError
-# from the OrderedDict lookup that kills the request with no response.
-for _bad in ({"a": 1}, ["valid-receipt"], 7, True, "no-such-scenario"):
-    _s, _b = _req("POST", "/api/assurance",
-                  {"botA": "antweight-vault-defender.adl.yaml",
-                   "botB": "antweight-vault-raider.adl.yaml",
-                   "scenario": _bad})
-    check(f"assurance API rejects scenario {_bad!r} with a clean 400",
-          _s == 400 and "error" in _b)
+# Scenario defaulting is absence-only. A supplied falsey or non-string
+# scenario must be a deterministic 400, not an implicit request for the valid
+# fixture and not an unhandled TypeError from the OrderedDict lookup.
+_NO_SCENARIO = object()
+
+
+def _assurance_request_body(scenario=_NO_SCENARIO):
+    _body = {"botA": "antweight-vault-defender.adl.yaml",
+             "botB": "antweight-vault-raider.adl.yaml"}
+    if scenario is not _NO_SCENARIO:
+        _body["scenario"] = scenario
+    return _body
+
+
+_s, _b = _req("POST", "/api/assurance", _assurance_request_body())
+check("assurance API defaults to the valid fixture only when scenario is omitted",
+      _s == 200 and _b["scenario"]["id"] == "valid-receipt")
+_s, _b = _req("POST", "/api/assurance", _assurance_request_body("valid-receipt"))
+check("assurance API accepts a supplied known scenario string",
+      _s == 200 and _b["scenario"]["id"] == "valid-receipt")
+for _label, _bad in (("null", None), ("false", False), ("true", True),
+                     ("zero", 0), ("empty string", ""),
+                     ("array", ["valid-receipt"]), ("object", {"a": 1}),
+                     ("number", 7)):
+    _s, _b = _req("POST", "/api/assurance", _assurance_request_body(_bad))
+    check(f"assurance API rejects supplied malformed scenario {_label} with the canonical 400",
+          _s == 400 and _b == {"error": "scenario must be a non-empty string"}
+          and "valid-receipt" not in _wjson.dumps(_b))
+_s, _b = _req("POST", "/api/assurance", _assurance_request_body("no-such-scenario"))
+check("assurance API preserves the unknown-string scenario behavior",
+      _s == 400 and _b == {"error": "unknown scenario"}
+      and "valid-receipt" not in _wjson.dumps(_b))
 # A corrupt fixture is a server defect, not caller error: it must not be
 # reported to the client as a 400, and must not leak the fixture path.
 import tempfile as _tmp_api
