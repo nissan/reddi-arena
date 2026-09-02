@@ -149,6 +149,16 @@ def main() -> None:
             "humanGate": True,
         })
 
+    # The governance nodes below are a verbatim snapshot of the graph-engineering
+    # pilot as it was executed. GE01's "CLAUDE.md" references are that historical
+    # record: today CLAUDE.md is a one-line import and AGENTS.md is the direct
+    # authority for the node workflow and hard boundaries. Completed-node text is
+    # deliberately NOT rewritten when the authority file moves, so this snapshot
+    # stays trustworthy as evidence; planning/graph.yaml also carries recorded
+    # evidence and done statuses this generator does not emit, which is why
+    # rerunning it is an archival re-derivation, not a maintenance step. Both
+    # halves are enforced by the "planning-graph re-derivation" checks in
+    # tests/test_arena.py.
     nodes.extend([
         {
             "id": "GE01",

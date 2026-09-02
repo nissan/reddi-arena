@@ -33,7 +33,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tools"))
 
-from core import chain  # noqa: E402
+from core import assurance, chain  # noqa: E402
 from core.arena import (  # noqa: E402
     run_vault_match, evaluate_hire, weigh_competitor, advertised_price,
     load_adl, ARENA_CURRENCY, ARENA_RAIL, CLASS_NAMES,
@@ -53,6 +53,85 @@ PERSISTENT = bool(os.environ.get("DATA_DIR"))
 # not exist (404), so the deploy fails closed rather than open.
 ADMIN_TOKEN = os.environ.get("ARENA_ADMIN_TOKEN", "")
 
+# Solana Devnet Preview (RAP Assurance) exposure gate. The preview is
+# fixture-only and reaches no wallet, RPC, signing, submission or custody path,
+# but hosting it publicly is a separately approval-gated action
+# (docs/DEVNET-PREVIEW-RAP-ASSURANCE.md), so it is OFF in every environment
+# unless an operator opts in explicitly. Only the exact strings in
+# ASSURANCE_PREVIEW_TRUE_VALUES enable it: no case folding, no whitespace
+# trimming, no truthiness. "True", "yes", "on", " true" and any other malformed
+# value leave it off, so a typo can only ever fail closed.
+ASSURANCE_PREVIEW_FLAG = "REDDI_ENABLE_SOLANA_DEVNET_ASSURANCE_PREVIEW"
+ASSURANCE_PREVIEW_TRUE_VALUES = ("true", "1")
+
+# The second half of the gate: an explicit operator declaration of WHERE the
+# preview is being served. The closed value set is "off" / "local" / "hosted",
+# and anything else — absent, empty, misspelled, wrong case — is off. "hosted"
+# is a capability this server can be configured with, never something this repo
+# sets: declaring it is a separately approved operator action, because enabling
+# the preview on an externally hosted service exposes it publicly. The context
+# is also the only truthful source for the externalDeployment boundary flag.
+ASSURANCE_CONTEXT_VAR = "REDDI_SOLANA_DEVNET_ASSURANCE_DEPLOYMENT_CONTEXT"
+ASSURANCE_CONTEXT_VALUES = ("off", "local", "hosted")
+ASSURANCE_CONTEXT_EXPOSING = ("local", "hosted")
+
+
+def preview_enabled(value) -> bool:
+    """True only for an exact documented opt-in value."""
+    return value in ASSURANCE_PREVIEW_TRUE_VALUES
+
+
+def deployment_context(value) -> str:
+    """The declared context, or "off" for absent/malformed/unknown values."""
+    return value if value in ASSURANCE_CONTEXT_VALUES else "off"
+
+
+def preview_exposure(flag_value, context_value):
+    """(enabled, external_deployment) for one flag/context pair.
+
+    Exposure needs BOTH halves: an exact opt-in flag value AND an exact
+    local/hosted context. Any other combination — flag on with no context, a
+    valid context with the flag off, a malformed either — is off, and
+    external_deployment is then None: unknown, never inferred False.
+    """
+    context = deployment_context(context_value)
+    if not preview_enabled(flag_value) or context not in ASSURANCE_CONTEXT_EXPOSING:
+        return False, None
+    return True, context == "hosted"
+
+
+ASSURANCE_PREVIEW_ENABLED, ASSURANCE_EXTERNAL_DEPLOYMENT = preview_exposure(
+    os.environ.get(ASSURANCE_PREVIEW_FLAG), os.environ.get(ASSURANCE_CONTEXT_VAR))
+
+# When the preview is off the marked regions of index.html are stripped before
+# the page is served, so the Devnet Preview tab, panel and its client code are
+# absent from the DOM rather than merely hidden.
+PREVIEW_MARKERS = (("<!-- devnet-preview:begin -->", "<!-- devnet-preview:end -->"),
+                   ("/* devnet-preview:begin */", "/* devnet-preview:end */"))
+
+
+def strip_preview_markup(html: str) -> str:
+    """Remove every marked Devnet Preview region, markers included. Raises if a
+    marker is left unpaired: a half-stripped page is a defect, not a fallback."""
+    for begin, end in PREVIEW_MARKERS:
+        while begin in html:
+            start = html.index(begin)
+            stop = html.find(end, start)
+            if stop < 0:
+                raise RuntimeError(f"unpaired preview marker: {begin}")
+            html = html[:start] + html[stop + len(end):]
+        if end in html:
+            raise RuntimeError(f"unpaired preview marker: {end}")
+    return html
+
+
+def arena_page_bytes() -> bytes:
+    """The /play document, with the preview stripped unless it is enabled."""
+    html = (ROOT / "web" / "static" / "index.html").read_text()
+    return (html if ASSURANCE_PREVIEW_ENABLED
+            else strip_preview_markup(html)).encode()
+
+
 # --- Hardening limits for the public surface --------------------------------
 # The service is internet-exposed on Railway with a persistent /data volume, so
 # every unauthenticated write path is bounded.
@@ -61,6 +140,13 @@ MAX_WAITLIST_ENTRIES = 100_000      # cap total stored signups (disk exhaustion)
 MAX_LEDGER_MATCHES = 10_000         # ring-buffer match history (disk exhaustion)
 SIGNUP_RATE_MAX = 20                # per-client signups allowed within the window
 FIGHT_RATE_MAX = 60                 # per-client match writes allowed within the window
+# The Devnet Preview runs the heaviest work on the surface (a full vault match,
+# weigh-ins, fixture load + rail-identity validation, receipt build and two
+# validation passes) for an unauthenticated caller, so it gets its own
+# deliberately conservative bucket: the UI makes one call per operator action,
+# far under this. It is a courtesy limit on a spoofable client key, not DDoS
+# protection; the hard bounds (body cap, key cap) do not depend on it.
+ASSURANCE_RATE_MAX = 20             # per-client Devnet Preview runs within the window
 SIGNUP_RATE_WINDOW = 60.0           # seconds
 SOCKET_READ_TIMEOUT = 15.0          # per-connection read timeout
 MAX_RATE_KEYS = 20_000              # hard cap on the rate-limit map (LRU-evicted)
@@ -381,19 +467,27 @@ class Handler(BaseHTTPRequestHandler):
             return None, True
         raw = self.rfile.read(length) if length > 0 else b""
         try:
-            return json.loads(raw or "{}"), None
+            body = json.loads(raw or "{}")
         except (ValueError, UnicodeDecodeError):
             self._send({"error": "invalid JSON"}, 400)
             return None, True
+        # Every POST route reads named fields, so a top-level array, scalar,
+        # string or null is caller error, not a request to serve. Rejecting it
+        # here — before any route sees it — is the only place that holds for
+        # all of them, and keeps a `.get` on a non-object from killing the
+        # connection with no response at all.
+        if not isinstance(body, dict):
+            self._send({"error": "request body must be a JSON object"}, 400)
+            return None, True
+        return body, None
 
     def do_GET(self):
         path = urlparse(self.path).path
-        if path in ("/", "/index.html", "/landing", "/landing.html"):
-            page = "landing.html" if path in ("/", "/landing", "/landing.html") else "index.html"
-            return self._send((ROOT / "web" / "static" / page).read_bytes(), ctype="text/html")
-        if path in ("/play", "/arena", "/app"):
-            return self._send((ROOT / "web" / "static" / "index.html").read_bytes(),
+        if path in ("/", "/landing", "/landing.html"):
+            return self._send((ROOT / "web" / "static" / "landing.html").read_bytes(),
                               ctype="text/html")
+        if path in ("/index.html", "/play", "/arena", "/app"):
+            return self._send(arena_page_bytes(), ctype="text/html")
         if path == "/api/meta":
             return self._send({"currency": ARENA_CURRENCY, "rail": ARENA_RAIL,
                                "persistent": PERSISTENT,
@@ -404,6 +498,11 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(bots())
         if path == "/api/market":
             return self._send(mercs())
+        if path == "/api/assurance/scenarios":
+            if not ASSURANCE_PREVIEW_ENABLED:
+                return self._send({"error": "not found"}, 404)
+            return self._send(
+                assurance.scenario_catalog(ASSURANCE_EXTERNAL_DEPLOYMENT))
         if path == "/api/leaderboard":
             return self._send(leaderboard())
         if path == "/api/waitlist":
@@ -424,11 +523,21 @@ class Handler(BaseHTTPRequestHandler):
     def _seed(self, req, default):
         try:
             return int(req.get("seed", default))
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             return default
 
     def do_POST(self):
         path = urlparse(self.path).path
+        # The preview gate is checked BEFORE the body is read and before any
+        # fixture is touched: with the flag off, /api/assurance is
+        # indistinguishable from an unknown path. The per-client limit follows
+        # it, still ahead of the body, so a rejected caller buys no JSON parse,
+        # no fixture read and no match run.
+        if path == "/api/assurance":
+            if not ASSURANCE_PREVIEW_ENABLED:
+                return self._send({"error": "not found"}, 404)
+            if not _rate_ok("assurance:" + _client_key(self), limit=ASSURANCE_RATE_MAX):
+                return self._send({"error": "rate limited"}, 429)
         req, err = self._read_body()
         if err:
             return
@@ -509,6 +618,52 @@ class Handler(BaseHTTPRequestHandler):
             proj["auddPlan"] = chain.audd_purse_plan(
                 "50.00", "OwnerB2222", "OwnerB2222-settle", "2026-12-31T23:59:59Z")
             return self._send(proj)
+
+        if path == "/api/assurance":
+            # Local/public Devnet Preview only. These request fields are not used
+            # by the UI, but the explicit refusal boundary prevents a caller
+            # from trying to turn the preview endpoint into a wallet/RPC/live
+            # payment helper.
+            if req.get("network") not in (None, assurance.SOLANA_DEVNET_NETWORK_ALIAS):
+                return self._send({"error": "Solana Devnet Preview only; mainnet/testnet/live rail requests are blocked"}, 400)
+            if req.get("paymentMode") not in (None, "fixture", "dry-run"):
+                return self._send({"error": "fixture/dry-run only; live payment mode is blocked"}, 400)
+            for flag in ("wallet", "sign", "submit", "rpc", "custody", "externalDeployment"):
+                if req.get(flag):
+                    return self._send({"error": f"{flag} is blocked in the local Devnet Preview"}, 400)
+            if "scenario" in req:
+                scenario = req["scenario"]
+                if not isinstance(scenario, str) or not scenario:
+                    return self._send({"error": "scenario must be a non-empty string"}, 400)
+            else:
+                scenario = "valid-receipt"
+            if scenario not in assurance.SCENARIOS:
+                return self._send({"error": "unknown scenario"}, 400)
+            try:
+                seed = self._seed(req, 2)
+                a = self._load_bot(req.get("botA"))
+                b = self._load_bot(req.get("botB"))
+                if a is None or b is None:
+                    return self._send({"error": "unknown bot"}, 400)
+                ha = self._load_bot(req["hireA"]) if req.get("hireA") else None
+                hb = self._load_bot(req["hireB"]) if req.get("hireB") else None
+                if (req.get("hireA") and ha is None) or (req.get("hireB") and hb is None):
+                    return self._send({"error": "unknown hire"}, 400)
+                ca, cb = req.get("classA"), req.get("classB")
+                for cls in (ca, cb):
+                    if cls is not None and (not isinstance(cls, str) or cls not in CLASS_NAMES):
+                        return self._send({"error": "unknown class"}, 400)
+                bundle = assurance.build_assurance_preview(
+                    a, b, scenario=scenario, seed=seed, hire_a=ha, hire_b=hb,
+                    entered_a=ca, entered_b=cb,
+                    external_deployment=ASSURANCE_EXTERNAL_DEPLOYMENT)
+            except assurance.AssuranceIntegrityError as exc:
+                print(f"[assurance] preview integrity failure: {exc}", flush=True)
+                return self._send(
+                    {"error": "Devnet Preview is unavailable: server-side fixture integrity check failed"}, 500)
+            except ValueError as exc:
+                return self._send({"error": str(exc)}, 400)
+            return self._send(bundle)
 
         if path == "/api/fight":
             if not _rate_ok("fight:" + _client_key(self), limit=FIGHT_RATE_MAX):

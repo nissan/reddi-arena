@@ -1,3 +1,17 @@
+> **ARCHIVAL — bootstrap snapshot, not current guidance.**
+> This file is the one-time handoff prompt written for the first agent session,
+> preserved verbatim as a historical record. Its status claims, counts, and
+> "immediate objective" describe the repository as it was at that moment and are
+> **not maintained**. Nothing here should be treated as an instruction today.
+>
+> For current guidance read, in this order:
+> [`AGENTS.md`](AGENTS.md) (working rules, methodology, hard boundaries),
+> [`README.md`](README.md) and [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
+> (what the product is and how it fits together),
+> [`planning/graph.yaml`](planning/graph.yaml) with `python3 tools/graph_lint.py`
+> (what to work on next), and the commands listed in `AGENTS.md` for the current
+> tooling.
+
 # Claude Code Handoff Prompt — Reddi Arena
 
 Copy everything between the lines into a Claude Code session started at the
@@ -10,7 +24,7 @@ Reddi Agent Protocol (RAP) and ADL v0.2. The codebase in this directory is
 complete and verified: 55 tests pass, the balance report is published, and the
 web app serves a marketing landing page at `/` and the arena at `/play`.
 
-**Read `CLAUDE.md` in full before doing anything.** It defines the methodology
+**Read `AGENTS.md` in full before doing anything.** It defines the methodology
 (SPDD: one GitHub issue per work loop, each bound to a REASONS-LITE artifact in
 `spdd/prompt/`) and the hard boundaries (dry-run rail only, one-way spec
 canonicality, no `*_packet`/`*_gate` scripts, claims discipline, determinism).

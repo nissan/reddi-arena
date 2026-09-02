@@ -64,7 +64,7 @@ Primary surfaces for this lane: docs/, findings/, .github/
 ## Claude Code prompt
 
 ```text
-You are working in nissan/reddi-arena. Read CLAUDE.md first, then read spdd/prompt/0037-f4-enforce-claims-discipline-across-all-public-aren.md
+You are working in nissan/reddi-arena. Read AGENTS.md first, then read spdd/prompt/0037-f4-enforce-claims-discipline-across-all-public-aren.md
 in full — it is the binding REASONS-LITE artifact for this issue and must be
 updated in the same PR if your implementation diverges from it.
 

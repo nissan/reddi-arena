@@ -67,7 +67,7 @@ Primary surfaces for this lane: web/, cli/, tutorials/
 ## Claude Code prompt
 
 ```text
-You are working in nissan/reddi-arena. Read CLAUDE.md first, then read spdd/prompt/0026-d1-build-the-visual-garage-that-emits-adl.md
+You are working in nissan/reddi-arena. Read AGENTS.md first, then read spdd/prompt/0026-d1-build-the-visual-garage-that-emits-adl.md
 in full — it is the binding REASONS-LITE artifact for this issue and must be
 updated in the same PR if your implementation diverges from it.
 

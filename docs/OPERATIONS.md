@@ -18,6 +18,8 @@ without it.
 | `RESEND_API_KEY` | No signup email is attempted, and the service makes **no outbound network calls at all** | From resend.com. |
 | `RESEND_FROM` | Same as above — both this and the key are required before anything sends | Must be on a **Resend-verified domain**, e.g. `Reddi Arena <arena@example.com>`. |
 | `WAITLIST_NOTIFY_EMAIL` | No operator notification (the signee still gets their confirmation) | Where "someone signed up" notices go. |
+| `REDDI_ENABLE_SOLANA_DEVNET_ASSURANCE_PREVIEW` | The Solana Devnet Preview is **absent**: `/play` omits its tab and panel, and `/api/assurance` returns 404 | Fails closed, and **not sufficient on its own** — the deployment context below must also be declared. `docs/DEVNET-PREVIEW-RAP-ASSURANCE.md` owns the accepted values and the rest of the gate contract. |
+| `REDDI_SOLANA_DEVNET_ASSURANCE_DEPLOYMENT_CONTEXT` | Reads as `off`, so the preview stays absent even with the flag set to `true` | Fails closed on anything outside its accepted set. **Setting `hosted` on this internet-facing service publicly exposes the preview and is a separately approved action with reviewed messaging.** `docs/DEVNET-PREVIEW-RAP-ASSURANCE.md` owns the accepted values and what the declaration derives. |
 
 ## Waitlist
 
@@ -112,6 +114,10 @@ fresh build from `main` — a useful lever, but a blunt one.
 
 Attaching or detaching the volume also triggers a redeploy. That is safe once
 `/data` is mounted; before it was, a redeploy wiped the waitlist.
+
+A redeploy never turns on the Solana Devnet Preview by itself: neither
+`Dockerfile` nor `railway.json` sets the flag above, so unless it has been added
+to this service's variables the preview stays absent across builds.
 
 ## Backups
 

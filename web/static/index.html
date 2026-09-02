@@ -143,6 +143,16 @@
   select:focus-visible,input:focus-visible{outline:2px solid var(--amber);outline-offset:0}
 
   .note{font-family:var(--mono);font-size:11px;color:var(--amber-dim);margin-top:8px}
+  .pill{display:inline-block;font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.07em;
+    border:1px solid var(--seam);border-radius:999px;padding:3px 8px;color:var(--ash);margin:0 6px 6px 0}
+  .pill.pass{color:var(--green);border-color:#2f5133}.pill.reject,.pill.fail{color:var(--red);border-color:#5c2a2e}
+  .pill.hold,.pill.blocked,.pill.refund{color:var(--amber);border-color:var(--amber-dim)}
+  .assurance-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px;margin-top:16px}
+  .mini{font-family:var(--mono);font-size:12px;color:var(--ash);line-height:1.55}
+  .mini b{color:var(--bone);font-weight:500}
+  details.receipt-json{margin-top:14px;background:#0f1114;border:1px solid var(--seam);border-radius:3px;padding:12px}
+  details.receipt-json summary{cursor:pointer;font-family:var(--mono);font-size:12px;color:var(--amber)}
+  details.receipt-json pre{white-space:pre-wrap;overflow:auto;font-family:var(--mono);font-size:11px;color:var(--bone)}
   footer{border-top:1px solid var(--seam);padding:24px 0;font-family:var(--mono);font-size:11px;
     color:var(--ash)}
   footer b{color:var(--bone)}
@@ -174,6 +184,9 @@
 
 <nav class="tabs"><div class="tabrow" role="tablist">
   <button class="tab" role="tab" aria-selected="true" data-panel="fight">The Arena</button>
+  <!-- devnet-preview:begin -->
+  <button class="tab" role="tab" aria-selected="false" data-panel="assurance">Devnet Preview</button>
+  <!-- devnet-preview:end -->
   <button class="tab" role="tab" aria-selected="false" data-panel="market">Power-Up Market</button>
   <button class="tab" role="tab" aria-selected="false" data-panel="board">Leaderboard</button>
   <button class="tab" role="tab" aria-selected="false" data-panel="build">Build a Power-Up</button>
@@ -204,6 +217,32 @@
 
     <div id="fightOut" style="margin-top:20px"></div>
   </section>
+
+  <!-- devnet-preview:begin -->
+  <!-- DEVNET PREVIEW / RAP ASSURANCE -->
+  <section class="panel" id="assurance" aria-labelledby="assuranceTitle">
+    <h2 class="sec" id="assuranceTitle">Solana Devnet Preview — RAP Assurance</h2>
+    <p class="mini" style="max-width:760px">
+      Preview only, <b>off unless an operator explicitly enables it</b>. Choose ADL-defined
+      agents, tweak the seed or fixture scenario, and inspect how RAP Assurance
+      checks paid-work evidence. The payment fixture proves only transfer metadata;
+      RAP Assurance checks the payment together with authority, authorization,
+      work trace, eval, attestation, replay, accounting, dispute, and rollback
+      evidence. No RPC, wallet, signing, custody, transaction submission, live
+      value, official-mint observation, grant evidence, or readiness claim is made.
+    </p>
+    <div class="controls" aria-describedby="assuranceBoundary">
+      <div class="field"><label for="assureBotA">Agent A</label><select id="assureBotA"></select></div>
+      <div class="field"><label for="assureHireA">Optional specialist</label><select id="assureHireA"></select></div>
+      <div class="field"><label for="assureBotB">Agent B</label><select id="assureBotB"></select></div>
+      <div class="field"><label for="assureSeed">Seed</label><input type="number" id="assureSeed" value="2" min="0" max="999"></div>
+      <div class="field"><label for="assureScenario">Fixture scenario</label><select id="assureScenario"></select></div>
+    </div>
+    <div id="assuranceBoundary" class="note">Devnet metadata is read-only program IDs and locally derived PDAs; AUDD data is a deterministic fixture with grantEligible=false.</div>
+    <button class="act" id="assuranceBtn">Run RAP Assurance preview</button>
+    <div id="assuranceOut" role="status" aria-live="polite" style="margin-top:20px"></div>
+  </section>
+  <!-- devnet-preview:end -->
 
   <!-- MARKET -->
   <section class="panel" id="market">
@@ -277,7 +316,8 @@ extensions:
 
 <script>
 const $ = s => document.querySelector(s);
-let BOTS=[], MERCS=[], META={};
+const esc=s=>String(s??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
+let BOTS=[], MERCS=[], META={}, ASSURANCE={scenarios:[]};
 const CLASSES=[["Antweight",100],["Beetleweight",250],["Hobbyweight",500],["Featherweight",900],["Middleweight",1800]];
 const classOf=au=>{for(const[n,c]of CLASSES)if(au<=c)return n;return "Heavyweight";};
 
@@ -293,12 +333,33 @@ async function boot(){
   MERCS.forEach(m=>{const o=document.createElement('option');o.value=m.id;
     o.textContent=`${m.name} · +${m.grants.defenseBonus||0} def · ${m.price.amount} cr`;hs.appendChild(o);});
   renderMarket(); loadBoard();
+  /* devnet-preview:begin */
+  try{await bootAssurance();}catch(e){console.error('Devnet Preview unavailable',e);}
+  /* devnet-preview:end */
   ['#botA','#hireA'].forEach(s=>$(s).addEventListener('change',updateScale));
   updateScale();
 }
 function fillSelect(sel,items,label,idx=0){const el=$(sel);el.innerHTML='';
   items.forEach((it,i)=>{const o=document.createElement('option');o.value=it.id;o.textContent=label(it);
     if(i===idx)o.selected=true;el.appendChild(o);});}
+/* devnet-preview:begin */
+// Every Devnet Preview control lives in one strippable block: with
+// REDDI_ENABLE_SOLANA_DEVNET_ASSURANCE_PREVIEW off, the server removes this
+// along with the tab and panel, so nothing here can reference a missing node.
+async function bootAssurance(){
+  ASSURANCE=await (await fetch('/api/assurance/scenarios')).json();
+  fillSelect('#assureBotA',BOTS,b=>`${b.name} · ${b.au}AU ${b.class}`);
+  fillSelect('#assureBotB',BOTS,b=>`${b.name} · ${b.au}AU ${b.class}`,1);
+  fillScenarioSelect();
+  const none=document.createElement('option');none.value='';none.textContent='— none —';
+  const ahs=$('#assureHireA');ahs.appendChild(none);
+  MERCS.forEach(m=>{const o=document.createElement('option');o.value=m.id;
+    o.textContent=`${m.name} · +${m.grants.defenseBonus||0} def · ${m.price.amount} cr`;ahs.appendChild(o);});
+}
+function fillScenarioSelect(){const el=$('#assureScenario');el.innerHTML='';
+  (ASSURANCE.scenarios||[]).forEach(s=>{const o=document.createElement('option');o.value=s.id;
+    o.textContent=`${s.title} · expect ${s.expect}`;el.appendChild(o);});}
+/* devnet-preview:end */
 
 async function updateScale(){
   const botId=$('#botA').value, hireId=$('#hireA').value;
@@ -382,6 +443,49 @@ function renderMatch(t){
     <div class="note">trace hash ${t.traceHash.slice(0,24)}… — same seed always replays identically</div>`;
 }
 
+/* devnet-preview:begin */
+async function runAssurance(){
+  const body={botA:$('#assureBotA').value,botB:$('#assureBotB').value,
+    hireA:$('#assureHireA').value||null,hireB:null,seed:+$('#assureSeed').value,
+    scenario:$('#assureScenario').value,paymentMode:'fixture',network:'solana-devnet'};
+  if(body.botA===body.botB){$('#assuranceOut').innerHTML='<p style="color:var(--red);font-family:var(--mono)">Pick two different agents.</p>';return;}
+  const resp=await fetch('/api/assurance',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(body)});
+  const bundle=await resp.json();
+  if(!resp.ok){$('#assuranceOut').innerHTML=`<p style="color:var(--red);font-family:var(--mono)">${esc(bundle.error||'preview refused')}</p>`;return;}
+  renderAssurance(bundle);
+}
+
+function statusPill(label,status){return `<span class="pill ${esc(status)}">${esc(label)}: ${esc(status)}</span>`;}
+function renderAssurance(b){
+  const r=b.adapters.receiptIntegrity.result;
+  const p=b.adapters.paymentObservation.result;
+  const turns=(b.trace.turns||[]).slice(0,5).map(t=>`<div class="turn ${t.outcome==='extracted'?'extract':'held'}"><span class="tn">t${esc(t.n)}</span><span class="who">${esc(t.attacker)} <span class="vs">${esc(t.strategy)} ${esc(t.probe_strength)} vs ${esc(t.defense_strength)}</span></span><span class="res">${esc(t.outcome)}</span></div>`).join('') || '<div class="turn held"><span class="tn">—</span><span class="who">pre-turn outcome</span><span class="res">no turns</span></div>';
+  const diags=(r.diagnostics||[]).map(d=>`<div class="mini"><b>${esc(d.code)}</b><br>${esc(d.message)}<br><span class="note">${esc(d.path)}</span></div>`).join('') || '<div class="mini"><b>No diagnostics.</b><br>All required fixture layers accepted.</div>';
+  const asserts=(b.assertions||[]).map(a=>`<div class="card"><h3>${esc(a.label)}</h3>${statusPill('status',a.status)}<p class="mini">${esc(a.text)}</p><div class="note">${esc(a.boundary)}</div></div>`).join('');
+  const first=p.firstAttempt?`<div class="note">First replay-store attempt: ${p.firstAttempt.ok?'accepted':'rejected'}; second attempt: ${esc(p.reason)}</div>`:'';
+  const artifact=b.receiptArtifact||{kind:'receipt',label:'RAP Assurance receipt'};
+  $('#assuranceOut').innerHTML=`
+    <div class="card" style="margin-bottom:14px"><span class="chip amber">${esc(b.label)}</span>
+      <h3>${esc(b.scenario.title)}</h3>
+      ${statusPill('RAP Assurance',r.decision)}${statusPill('payment observation',p.ok?'pass':'fail')}${statusPill('settlement',b.settlement.decision)}
+      <p class="mini">${esc(b.scenario.summary)}</p>
+      <div class="note">Payments prove transfer metadata; RAP Assurance proves paid work by requiring the receipt/evidence layers to agree.</div>
+    </div>
+    <div class="assurance-grid">${asserts}</div>
+    <div class="assurance-grid">
+      <div class="card"><h3>Replayable work trace</h3><div class="console">${turns}</div>
+        <div class="note">trace ${esc((b.trace.traceHash||'').slice(0,32))}… · no live model calls</div></div>
+      <div class="card"><h3>Payment fixture</h3>
+        <div class="mini"><b>${esc(b.adapters.paymentObservation.fixtureId)}</b><br>${esc(p.ok?'exact TransferChecked fixture accepted':p.arenaRefusal||p.reason||'not observed')}</div>
+        ${first}<div class="note">${esc(b.adapters.paymentObservation.boundary)}</div></div>
+      <div class="card"><h3>RAP receipt diagnostics</h3>${diags}</div>
+    </div>
+    <details class="receipt-json"><summary>Inspect ${esc(artifact.label)} JSON</summary><pre>${esc(JSON.stringify(b.receipt||{receipt:'not emitted for this denied path'},null,2))}</pre></details>
+    <div class="coach"><b>Contribute verification fixtures</b>Add deterministic parsed-payment or receipt fixtures under <code>${esc(b.contribution.fixtures)}</code>, document the simulated/read-only/blocked boundary, and prove it through <code>${esc(b.contribution.tests)}</code>. Canonical RAP/ADL semantics stay upstream; Arena only adapts to them.</div>`;
+}
+/* devnet-preview:end */
+
 async function loadBoard(){
   const d=await (await fetch('/api/leaderboard')).json();
   const b=$('#boardBody');
@@ -399,6 +503,9 @@ document.querySelectorAll('.tab').forEach(t=>t.addEventListener('click',()=>{
   if(t.dataset.panel==='board')loadBoard();
 }));
 $('#fightBtn').addEventListener('click',fight);
+/* devnet-preview:begin */
+$('#assuranceBtn').addEventListener('click',runAssurance);
+/* devnet-preview:end */
 $('#chainBtn').addEventListener('click',async()=>{
   const r=await (await fetch('/api/chain',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({botA:$('#botA').value,botB:$('#botB').value,seed:+$('#seed').value,

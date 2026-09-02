@@ -11,7 +11,7 @@
 > - Required verification for every node:
 >   `python3 tests/test_arena.py` (55+ checks), `python3 tools/validate_adl.py`,
 >   `python3 tools/graph_lint.py`.
-> - Hard boundaries from CLAUDE.md apply above everything here: dry-run rail
+> - Hard boundaries from AGENTS.md apply above everything here: dry-run rail
 >   only, one-way spec canonicality, claims discipline, determinism, and the
 >   2026-07-26 automation pause — this workflow is process run inside
 >   interactive sessions, never a cron/loop, and no

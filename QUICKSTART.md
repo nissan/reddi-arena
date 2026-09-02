@@ -33,12 +33,20 @@ python3 cli/arena.py chain antweight-vault-defender.adl.yaml \
                      antweight-vault-raider.adl.yaml --audd 50.00
 python3 cli/arena.py chain ... --fail-gate    # payout blocked despite a completed match
 python3 cli/arena.py chain ... --no-attest    # dispute instead of payout
+
+# local Solana Devnet Preview — RAP Assurance fixtures, writes nothing.
+# Off by default; start the server with the flag to reach it (see Web, below).
+curl -s http://127.0.0.1:8000/api/assurance/scenarios
 ```
 
 ## Web
 
 ```bash
 python3 web/server.py 8000
+
+# with the Solana Devnet Preview tab (off by default; both exact values required)
+REDDI_ENABLE_SOLANA_DEVNET_ASSURANCE_PREVIEW=true \
+  REDDI_SOLANA_DEVNET_ASSURANCE_DEPLOYMENT_CONTEXT=local python3 web/server.py 8000
 ```
 
 | Route | What it is |
@@ -51,14 +59,19 @@ system and no published retention policy — the landing page says so plainly.
 
 Five tabs: **The Arena** (weigh in, draft, fight, coached replay), **Power-Up
 Market** (specialists for hire), **Leaderboard**, **Build a Power-Up** (the ADL
-shape for sellers), **On-Chain** (the Solana projection).
+shape for sellers), **On-Chain** (the Solana projection). A sixth, **Devnet
+Preview** (local RAP Assurance receipt and tamper/replay fixtures), appears only
+when `REDDI_ENABLE_SOLANA_DEVNET_ASSURANCE_PREVIEW` **and** the deployment
+context `REDDI_SOLANA_DEVNET_ASSURANCE_DEPLOYMENT_CONTEXT` are both set to exact
+values — boundaries and the accepted values are in
+`docs/DEVNET-PREVIEW-RAP-ASSURANCE.md`.
 
 ## Tests
 
 ```bash
 python3 tools/simulate.py --seeds 200   # balance sweep -> docs/BALANCE-REPORT.md
 python3 tools/rehearse.py       # localnet rehearsal preflight (starts nothing)
-python3 tests/test_arena.py     # 51 checks: determinism, draft rule, power-up effect, boundaries
+python3 tests/test_arena.py     # whole suite: determinism, draft rules, boundaries, Devnet Preview refusals
 python3 tools/validate_adl.py   # all fighters validate against the pinned ADL v0.2 schema
 ```
 
@@ -73,6 +86,7 @@ python3 tools/validate_adl.py   # all fighters validate against the pinned ADL v
 | `docs/WEIGHT-CLASS-v0.1.md` | The AU formula |
 | `docs/BALANCE-REPORT.md` | Published balance data |
 | `docs/BLOCKCHAIN-INTEGRATION-ASSESSMENT.md` | Solana/AUDD/x402/identity mapping |
+| `docs/DEVNET-PREVIEW-RAP-ASSURANCE.md` | The Devnet Preview tab — scenarios, boundaries, fixture contributions |
 | `docs/FINDINGS.md` | Spec findings filed upstream |
 
 ## Two roles
@@ -93,6 +107,7 @@ its price and the capability it grants. Competitors hire it in the draft. See
 | Deterministic Vault matches + replay | Live model-driven competitors — separate approval-gated lane |
 | Arena-credit prizes on dry-run rail | Any devnet write — needs scoped operator approval |
 | On-chain payload projection with **real PDAs** (`find_program_address`) | Actual submission — no RPC/wallet/signing exists in this codebase |
+| Local Solana Devnet Preview for RAP Assurance receipts and negative fixtures | Real devnet writes, official AUDD mint observation, grant evidence, custody, or external deployment |
 | Offline rehearsal preflight — 33 checks against `programs/escrow` constraints | Running a validator — needs surfpool/solana-test-validator installed |
 | AUDD payment plans (`reddi.audd-payment-plan.v1`, dry-run) | AUDD custody, SPL escrow, settlement finality |
 

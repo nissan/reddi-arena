@@ -702,6 +702,165 @@ check("GE02 epic body embeds the marker and its sub-issue references",
       "<!-- graph-epic: E01 -->" in _ge02_body(_ge02["epics"][0])
       and "#1" in _ge02_body(_ge02["epics"][0]))
 
+print("generated-prompt guidance pointer migration")
+# spdd/prompt artifacts are SEEDED by tools/generate_prompts.py and then
+# hand-maintained: Sync Log rows, completed DoD checkmarks and issue metadata are
+# node evidence AGENTS.md requires to exist, and a full regeneration destroys
+# them. So moving the guidance pointer uses a narrow migration mode that must
+# rewrite exactly one span per file and preserve every other byte.
+import shutil as _shutil_gp
+import tempfile as _tempfile_gp
+from pathlib import Path as _Path_gp
+import generate_prompts as _gp
+
+_gp_plan, _gp_failures, _gp_stats = _gp.plan_graph()
+_gp_by_id = {i["id"]: (i, e) for e in _gp_plan["epics"] for i in e["issues"]}
+_gp_names = _gp.generated_artifact_names(_gp_stats, _gp_by_id)
+check("the migration targets only generated artifacts, never the kickoff record",
+      len(_gp_names) == 36 and "0001-project-kickoff.md" not in _gp_names
+      and all((ROOT / "spdd" / "prompt" / n).is_file() for n in _gp_names))
+
+# Golden before/after: a checked-in artifact reverted to the legacy pointer must
+# come back byte-identical to the checked-in file.
+_gp_dir = _Path_gp(_tempfile_gp.mkdtemp(prefix="arena-pointer-migration-"))
+_gp_sample = _gp_names[0]
+_gp_after = (ROOT / "spdd" / "prompt" / _gp_sample).read_text()
+_gp_before = _gp_after.replace(_gp.guidance_pointer(_gp.GUIDANCE_DOC),
+                               _gp.guidance_pointer("CLAUDE.md"), 1)
+check("the golden 'before' really differs only in the pointer document",
+      _gp_before != _gp_after
+      and _gp_before.replace("CLAUDE.md", "AGENTS.md", 1) == _gp_after)
+(_gp_dir / _gp_sample).write_text(_gp_before)
+_gp_changed, _gp_already = _gp.migrate_guidance_pointer(_gp_dir, [_gp_sample])
+check("migrating a legacy artifact reproduces the checked-in bytes exactly",
+      _gp_changed == [_gp_sample] and not _gp_already
+      and (_gp_dir / _gp_sample).read_text() == _gp_after)
+# Idempotence: a second run is a no-op and leaves the bytes untouched.
+_gp_changed2, _gp_already2 = _gp.migrate_guidance_pointer(_gp_dir, [_gp_sample])
+check("a second migration run changes nothing (idempotent)",
+      not _gp_changed2 and _gp_already2 == [_gp_sample]
+      and (_gp_dir / _gp_sample).read_text() == _gp_after)
+# --dry-run reports the work without touching the file.
+(_gp_dir / _gp_sample).write_text(_gp_before)
+_gp_dry, _ = _gp.migrate_guidance_pointer(_gp_dir, [_gp_sample], dry_run=True)
+check("--dry-run reports the rewrite without writing it",
+      _gp_dry == [_gp_sample] and (_gp_dir / _gp_sample).read_text() == _gp_before)
+# Hand-maintained evidence survives: a Sync Log row, a ticked DoD box and an
+# issue number added after generation are all still present afterwards.
+_gp_hand = _gp_before.replace("- [ ] ", "- [x] ", 1) + (
+    "| 2026-08-16 | hand-added divergence row | artifact | code |\n")
+(_gp_dir / _gp_sample).write_text(_gp_hand)
+_gp.migrate_guidance_pointer(_gp_dir, [_gp_sample])
+_gp_out = (_gp_dir / _gp_sample).read_text()
+check("migration preserves hand-maintained Sync Log rows and DoD checkmarks",
+      "2026-08-16 | hand-added divergence row" in _gp_out
+      and "- [x] " in _gp_out
+      and _gp_out == _gp_hand.replace(_gp.guidance_pointer("CLAUDE.md"),
+                                      _gp.guidance_pointer(_gp.GUIDANCE_DOC), 1))
+# Refusals: a file with no recognised pointer, an ambiguous one, or a missing
+# artifact must raise rather than guess at a rewrite.
+_gp_refusals = 0
+for _gp_text in ("no pointer here at all\n",
+                 _gp_before + _gp_after,
+                 _gp_before + _gp_before):
+    (_gp_dir / _gp_sample).write_text(_gp_text)
+    try:
+        _gp.migrate_guidance_pointer(_gp_dir, [_gp_sample])
+    except _gp.PointerMigrationError:
+        _gp_refusals += 1
+    if (_gp_dir / _gp_sample).read_text() != _gp_text:
+        _gp_refusals = -99  # a refused migration must not have written anything
+check("missing and ambiguous pointers refuse without writing", _gp_refusals == 3)
+try:
+    _gp.migrate_guidance_pointer(_gp_dir, ["not-an-artifact.md"])
+    _gp_missing = False
+except _gp.PointerMigrationError:
+    _gp_missing = True
+check("a missing expected artifact refuses the migration", _gp_missing)
+_shutil_gp.rmtree(_gp_dir)
+# The checked-in tree is already migrated, so running the mode over it is a no-op.
+_gp_changed3, _gp_already3 = _gp.migrate_guidance_pointer(
+    ROOT / "spdd" / "prompt", _gp_names, dry_run=True)
+check("every checked-in generated artifact already points at AGENTS.md",
+      not _gp_changed3 and len(_gp_already3) == len(_gp_names))
+
+print("planning-graph re-derivation preserves completed-node history")
+# planning/graph.yaml was SEEDED by tools/plan_to_graph.py (GE01) and is
+# hand-maintained after that: done statuses and evidence.recorded are the node
+# evidence AGENTS.md requires, and the generator emits neither for a node the
+# backlog does not already mark done. So re-running the generator is an ARCHIVAL
+# re-derivation, never a maintenance step, and the right regression asserts
+# non-rewrite of the hand-maintained fields — not byte-equality of a regenerated
+# file, which would enshrine exactly the loss described below.
+import subprocess as _sp_pg
+import tempfile as _tempfile_pg
+from pathlib import Path as _Path_pg
+import yaml as _yaml_pg
+import plan_to_graph as _p2g
+
+# The generator writes to one fixed path; redirect it so this regression can
+# never mutate the checked-in graph (ROOT rides along only for its log line).
+_pg_path = ROOT / "planning" / "graph.yaml"
+_pg_before = _pg_path.read_text()
+_pg_dir = _Path_pg(_tempfile_pg.mkdtemp(prefix="arena-graph-rederive-"))
+_pg_out = _pg_dir / "graph.yaml"
+
+
+def _rederive_graph():
+    _saved = (_p2g.OUT, _p2g.ROOT)
+    _p2g.OUT, _p2g.ROOT = _pg_out, _pg_dir
+    try:
+        _p2g.main()
+    finally:
+        _p2g.OUT, _p2g.ROOT = _saved
+    return _pg_out.read_text()
+
+
+_pg_fresh_text = _rederive_graph()
+check("re-deriving the graph never writes planning/graph.yaml",
+      _pg_path.read_text() == _pg_before and _pg_out.is_file())
+_pg_live = {n["id"]: n for n in _yaml_pg.safe_load(_pg_before)["nodes"]}
+_pg_fresh = {n["id"]: n for n in _yaml_pg.safe_load(_pg_fresh_text)["nodes"]}
+check("the re-derivation still covers exactly the checked-in node set",
+      set(_pg_fresh) == set(_pg_live) and len(_pg_live) == 42)
+
+# Why byte-equality is the wrong gate: most completed nodes were marked done in
+# the graph after migration, so a full regeneration demotes them and discards the
+# merged-PR evidence recorded by hand.
+_pg_hand_done = [i for i, n in _pg_live.items()
+                 if n["status"] == "done" and n["evidence"].get("recorded")]
+_pg_dropped = [i for i in _pg_hand_done
+               if _pg_fresh[i]["status"] != "done"
+               or not _pg_fresh[i]["evidence"].get("recorded")]
+check("a full regeneration would drop recorded evidence (archival re-derivation only)",
+      set(_pg_dropped) >= {"GE01", "GE02", "GE03"})
+check("the checked-in graph keeps every completed node's status and evidence",
+      len(_pg_hand_done) >= 21
+      and all(_pg_live[i]["evidence"]["recorded"] for i in _pg_hand_done))
+
+# The authority file moved (CLAUDE.md is now a one-line import of AGENTS.md), but
+# GE01 is a completed node: its text records the workflow as it was executed, so
+# neither the graph nor the generator may be rewritten to today's pointer.
+_pg_ge01 = _pg_live["GE01"]
+_pg_hist = "\n".join([_pg_ge01["objective"], *_pg_ge01["acceptance"],
+                       *_pg_ge01["surfaces"]["allow"]])
+check("the completed GE01 node still records the authority file it ran against",
+      "CLAUDE.md" in _pg_hist and "AGENTS.md" not in _pg_hist)
+check("re-derivation reproduces GE01's historical text verbatim (no authority rewrite)",
+      all(_pg_fresh["GE01"][f] == _pg_ge01[f]
+          for f in ("title", "objective", "acceptance", "boundary", "surfaces")))
+check("today's authority is AGENTS.md, reached from CLAUDE.md by import",
+      (ROOT / "CLAUDE.md").read_text().strip().endswith("@AGENTS.md")
+      and (ROOT / "AGENTS.md").is_file())
+
+check("re-derivation is deterministic (a second run is byte-identical)",
+      _rederive_graph() == _pg_fresh_text)
+check("the checked-in graph and its re-derivation both lint clean (G1-G7)",
+      all(_sp_pg.run([sys.executable, str(ROOT / "tools" / "graph_lint.py"), str(_p)],
+                     capture_output=True).returncode == 0
+          for _p in (_pg_path, _pg_out)))
+_shutil_gp.rmtree(_pg_dir)
+
 print("provider abstraction (B3: T-026 T-027 T-028)")
 import yaml as _yaml_b3
 from core.providers import (
@@ -1363,7 +1522,7 @@ check("T-009 defender weighs exactly 62 AU", weigh(DEF)["soloAU"] == 62)
 check("T-009 mercenary weighs exactly 91 AU", weigh(MERC)["soloAU"] == 91)
 
 # The formula is frozen: the spec document must say so, and changes must go
-# through a v0.2 formula spec, never a mid-season edit (CLAUDE.md boundary).
+# through a v0.2 formula spec, never a mid-season edit (AGENTS.md boundary).
 _spec = (ROOT / "docs" / "WEIGHT-CLASS-v0.1.md").read_text()
 check("frozen spec: status is frozen, not draft",
       "**Status:** frozen" in _spec and "draft" not in _spec.split("\n")[2])
@@ -1571,6 +1730,656 @@ for _name, _fn in _tampers.items():
 check("toolchain detection reports honestly",
       detect_toolchain()["canExecute"] is False or bool(detect_toolchain()["found"]))
 
+print("RAP Assurance Devnet Preview")
+from core import assurance
+_catalog = assurance.scenario_catalog()
+check("assurance catalog is explicitly local Solana Devnet Preview",
+      _catalog["boundary"]["cluster"] == "solana-devnet"
+      and _catalog["boundary"]["transactionSubmitted"] is False
+      and _catalog["boundary"]["walletSigning"] is False
+      and _catalog["boundary"]["officialMintObservation"] is False)
+# The boundary only asserts what the code can prove about itself. Building a
+# preview deploys nothing; whether the process is externally hosted is an
+# operator declaration, so with no declared context the claim is absent rather
+# than asserted false.
+check("boundary asserts no deployment by this request and never guesses hosting",
+      _catalog["boundary"]["deploymentPerformedByRequest"] is False
+      and "externalDeployment" not in _catalog["boundary"]
+      and "externalDeployment" not in assurance.boundary_flags()
+      and "externalDeployment" not in
+      assurance.build_assurance_preview(DEF, RAID, seed=2)["boundary"])
+check("a declared context is the only source of the externalDeployment claim",
+      assurance.boundary_flags(False)["externalDeployment"] is False
+      and assurance.boundary_flags(True)["externalDeployment"] is True
+      and assurance.scenario_catalog(True)["boundary"]["externalDeployment"] is True
+      and assurance.build_assurance_preview(
+          DEF, RAID, seed=2, external_deployment=True)["boundary"]["externalDeployment"] is True)
+_assurance_cases = {
+    "valid-receipt": ("accept", "release", []),
+    "tampered-trace": ("reject", "blocked", ["rap_assurance.evidence.trace_tampered"]),
+    "wrong-mint": ("reject", "blocked", ["rap_assurance.payment_observation.wrong_mint"]),
+    "wrong-payee": ("reject", "blocked", ["rap_assurance.payment_observation.wrong_payee"]),
+    "duplicate-replay": ("reject", "blocked", ["rap_assurance.payment_observation.replay_detected",
+                                                 "rap_receipt.replay.duplicate_payment"]),
+    "refund-gate-failed": ("reject", "refund", ["rap_receipt.eval.failed"]),
+    "authorization-denied": ("reject", "blocked", ["rap_receipt.authority.scope_mismatch"]),
+}
+for _case, (_decision, _settlement, _codes) in _assurance_cases.items():
+    _bundle = assurance.build_assurance_preview(DEF, RAID, scenario=_case, seed=2)
+    _result = _bundle["adapters"]["receiptIntegrity"]["result"]
+    _seen = {d["code"] for d in _result["diagnostics"]}
+    check(f"assurance scenario {_case} gives {_decision}/{_settlement}",
+          _result["decision"] == _decision
+          and _bundle["settlement"]["decision"] == _settlement
+          and all(c in _seen for c in _codes))
+_valid = assurance.build_assurance_preview(DEF, RAID, scenario="valid-receipt", seed=2)
+check("valid assurance receipt uses canonical RAP receipt/policy versions",
+      _valid["receipt"]["schemaVersion"] == "reddi.receipt.v1"
+      and _valid["receipt"]["policyDecision"]["schemaVersion"] == "reddi.policy-decision.v1")
+check("valid assurance payment observation is fixture-backed and never grant evidence",
+      _valid["adapters"]["paymentObservation"]["result"]["observation"]["evidence"]
+      == {"source": "parsed-transaction-fixture", "grantEligible": False})
+for _case in _assurance_cases:
+    _bundle = assurance.build_assurance_preview(DEF, RAID, scenario=_case, seed=2)
+    _pay_result = _bundle["adapters"]["paymentObservation"]["result"]
+    _receipt = _bundle["receipt"]
+    _identity = assurance.canonical_fixture_rail_identity()
+    _receipt_identity_ok = True
+    if _receipt is not None:
+        _receipt_identity_ok = (
+            _receipt["metadata"]["fixtureRailIdentity"] == _identity
+            and _receipt["payment"]["network"] == _identity["networkAlias"]
+            and _receipt["payment"]["asset"] == _identity["asset"]
+            and _receipt["policyDecision"]["network"] == _identity["networkAlias"]
+            and _receipt["policyDecision"]["asset"] == _identity["asset"]
+            and _receipt["metadata"]["expectedPaymentTerms"]["network"] == _identity["networkAlias"]
+            and _receipt["metadata"]["expectedPaymentTerms"]["caip2"] == _identity["caip2"]
+            and _receipt["metadata"]["expectedPaymentTerms"]["mint"] == _identity["mint"]
+        )
+    _observation_identity_ok = True
+    if _pay_result.get("ok"):
+        _obs_case = _pay_result["observation"]
+        _observation_identity_ok = (
+            _obs_case["network"] == _identity["networkAlias"]
+            and _obs_case["mint"] == _identity["mint"]
+            and _obs_case["tokenProgram"] == _identity["tokenProgram"]
+            and _obs_case["decimals"] == _identity["decimals"]
+            and _pay_result["replayKey"].startswith(
+                f"spl-transfer-checked:{_identity['networkAlias']}:")
+        )
+    check(f"{_case} keeps payment observation, policy, and receipt identity on the canonical fixture rail",
+          _receipt_identity_ok and _observation_identity_ok)
+
+# reddi.svm-spl-transfer-checked-observation.v1 declares an exact member set
+# (packages/x402-solana/src/spl-token-observer.ts); Arena disclosure must not
+# widen a document that advertises a canonical schemaVersion.
+_CANONICAL_OBSERVATION_KEYS = {
+    "schemaVersion", "verifierVersion", "network", "signature", "slot", "blockTime",
+    "commitment", "instructionIndex", "innerInstruction", "sourceTokenAccount",
+    "destinationTokenAccount", "destinationOwner", "authority", "mint", "tokenProgram",
+    "amountBaseUnits", "decimals", "memo", "paymentIntentId", "evidence",
+}
+_obs = _valid["adapters"]["paymentObservation"]["result"]["observation"]
+check("the emitted observation carries no member outside the canonical v1 schema",
+      _obs["schemaVersion"] == "reddi.svm-spl-transfer-checked-observation.v1"
+      and set(_obs) <= _CANONICAL_OBSERVATION_KEYS
+      and set(_obs["evidence"]) == {"source", "grantEligible"})
+_labels = _valid["adapters"]["paymentObservation"]["arenaPreviewLabels"]
+check("preview environment/eligibility disclosure lives in an Arena-owned object",
+      _labels["schemaVersion"] == assurance.ARENA_PREVIEW_LABELS_VERSION
+      and _labels["environment"] == "deterministic-fixture"
+      and _labels["eligibility"] == "non_eligible")
+check("assurance preview explains payment transfer is not paid work proof",
+      any(a["id"] == "rap-assurance-paid-work" and "Payment alone" in a["boundary"]
+          for a in _valid["assertions"]))
+
+# The official AUDD mainnet mint is a gated verified-mainnet identity upstream.
+# A devnet fixture presenting it would be an unsupported AUDD claim, so it must
+# not survive anywhere in the preview and must be refused at load/verify time.
+_devnet_fixture = assurance.load_payment_fixture()
+check("devnet fixture pays with the canonical synthetic AUDD sentinel mint",
+      _devnet_fixture["expected"]["mint"]
+      == assurance.AUDD_DETERMINISTIC_FIXTURE_MINT)
+check("devnet fixture identity is the canonical deterministic Solana rail",
+      _devnet_fixture["railIdentity"] == assurance.canonical_fixture_rail_identity()
+      and _devnet_fixture["expected"]["network"] == assurance.SOLANA_DEVNET_NETWORK_ALIAS
+      and _devnet_fixture["railIdentity"]["caip2"] == assurance.SOLANA_DEVNET_CAIP2
+      and _devnet_fixture["expected"]["tokenProgram"] == assurance.SPL_TOKEN_PROGRAM_ID
+      and _devnet_fixture["expected"]["decimals"] == assurance.AUDD_DECIMALS)
+import json as _json_ass
+check("no preview scenario surfaces the official AUDD mainnet mint",
+      all(assurance.AUDD_OFFICIAL_SOLANA_MAINNET_MINT
+          not in _json_ass.dumps(assurance.build_assurance_preview(DEF, RAID, scenario=_c, seed=2))
+          for _c in _assurance_cases))
+_official_expected = dict(assurance.load_payment_fixture()["expected"],
+                          mint=assurance.AUDD_OFFICIAL_SOLANA_MAINNET_MINT)
+_official = assurance.verify_spl_transfer_checked_fixture(
+    assurance.load_payment_fixture()["parsedTransaction"], _official_expected)
+check("fixture verifier refuses an expectation naming the official AUDD mainnet mint",
+      _official["ok"] is False and _official["reason"] == "wrong_mint"
+      and _official["arenaRefusal"] == "official_mint_blocked"
+      and assurance.AUDD_OFFICIAL_SOLANA_MAINNET_MINT not in _json_ass.dumps(_official))
+for _label, _expected in (
+        ("mainnet network", dict(assurance.load_payment_fixture()["expected"], network="solana-mainnet-beta")),
+        ("unknown network", dict(assurance.load_payment_fixture()["expected"], network="solana-preview")),
+        ("wrong CAIP-2", dict(assurance.load_payment_fixture()["expected"],
+                               caip2="solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"))):
+    _res = assurance.verify_spl_transfer_checked_fixture(
+        assurance.load_payment_fixture()["parsedTransaction"], _expected)
+    check(f"fixture verifier refuses {_label} instead of accepting arbitrary network identity",
+          _res["ok"] is False and _res["reason"] == "malformed_expected_payment")
+# The refusal must also cover the observed side: a parsed transaction carrying
+# the official mint must not reach candidate matching, which would echo it back
+# through the adapter result as an "actual" value.
+_official_parsed = _json_ass.loads(
+    _json_ass.dumps(assurance.load_payment_fixture()["parsedTransaction"]).replace(
+        assurance.AUDD_DETERMINISTIC_FIXTURE_MINT,
+        assurance.AUDD_OFFICIAL_SOLANA_MAINNET_MINT))
+_official_actual = assurance.verify_spl_transfer_checked_fixture(
+    _official_parsed, assurance.load_payment_fixture()["expected"])
+check("fixture verifier refuses a parsed transaction carrying the official mint, without echoing it",
+      _official_actual["ok"] is False and _official_actual["reason"] == "wrong_mint"
+      and _official_actual["arenaRefusal"] == "official_mint_blocked"
+      and assurance.AUDD_OFFICIAL_SOLANA_MAINNET_MINT not in _json_ass.dumps(_official_actual))
+
+# Observation failure reasons are a closed upstream union; an Arena-specific
+# refusal travels beside it, never inside it.
+for _case in _assurance_cases:
+    _res = assurance.build_assurance_preview(DEF, RAID, scenario=_case, seed=2)[
+        "adapters"]["paymentObservation"]["result"]
+    check(f"payment observation for {_case} keeps reason inside the canonical union",
+          "reason" not in _res
+          or _res["reason"] in assurance.CANONICAL_OBSERVATION_FAILURE_REASONS)
+try:
+    assurance._payment_failure("official_mint_blocked", "minted reason")
+    _minted_reason_ok = True
+except assurance.AssuranceIntegrityError:
+    _minted_reason_ok = False
+check("a non-canonical observation failure reason is refused, not emitted",
+      _minted_reason_ok is False)
+import tempfile as _tmp_ass
+_real_fixture_path = assurance.FIXTURE_PATH
+with _tmp_ass.NamedTemporaryFile("w", suffix=".json", delete=False) as _fh:
+    _fh.write(_real_fixture_path.read_text().replace(
+        assurance.AUDD_DETERMINISTIC_FIXTURE_MINT,
+        assurance.AUDD_OFFICIAL_SOLANA_MAINNET_MINT))
+    _bad_fixture_path = Path(_fh.name)
+try:
+    assurance.FIXTURE_PATH = _bad_fixture_path
+    try:
+        assurance.load_payment_fixture()
+        _fixture_refused = False
+    except assurance.AssuranceIntegrityError:
+        _fixture_refused = True
+finally:
+    assurance.FIXTURE_PATH = _real_fixture_path
+    _bad_fixture_path.unlink()
+check("a contributed fixture carrying the official AUDD mainnet mint is refused",
+      _fixture_refused)
+
+# Every fixture defect is a server-side integrity failure, so it must reach the
+# sanitized-500 handler rather than JSONDecodeError/KeyError/ValueError escaping
+# as a caller error or an unhandled traceback.
+def _fixture_load_outcome(text):
+    with _tmp_ass.NamedTemporaryFile("w", suffix=".json", delete=False) as _f:
+        _f.write(text)
+        _path = Path(_f.name)
+    try:
+        assurance.FIXTURE_PATH = _path
+        try:
+            assurance.load_payment_fixture()
+            return "loaded"
+        except assurance.AssuranceIntegrityError:
+            return "integrity"
+        except Exception as exc:
+            return type(exc).__name__
+    finally:
+        assurance.FIXTURE_PATH = _real_fixture_path
+        _path.unlink()
+
+def _swap_only_instruction_for_memo(fixture):
+    fixture["parsedTransaction"]["transaction"]["message"]["instructions"] = [
+        {"programId": assurance.SPL_MEMO_PROGRAM_ID, "program": "spl-memo", "parsed": "reddi:pay:x"}]
+    return fixture
+
+
+def _empty_post_token_balances(fixture):
+    fixture["parsedTransaction"]["meta"]["postTokenBalances"] = []
+    return fixture
+
+
+_good_fixture_text = _real_fixture_path.read_text()
+
+
+def _fixture_text_with(path, value):
+    _doc = _json_ass.loads(_good_fixture_text)
+    _node = _doc
+    for _part in path[:-1]:
+        _node = _node[_part]
+    _node[path[-1]] = value
+    return _json_ass.dumps(_doc)
+
+
+_broken_fixtures = {
+    "truncated json": "",
+    "json array not object": "[]",
+    "missing expected": _json_ass.dumps(
+        {k: v for k, v in _json_ass.loads(_good_fixture_text).items() if k != "expected"}),
+    "missing fixtureId": _json_ass.dumps(
+        {k: v for k, v in _json_ass.loads(_good_fixture_text).items() if k != "fixtureId"}),
+    "non-numeric amount": _good_fixture_text.replace('"amountBaseUnits": "2500000"',
+                                                     '"amountBaseUnits": "abc"', 1),
+    "wrong-typed expected": _json_ass.dumps(
+        {**_json_ass.loads(_good_fixture_text), "expected": []}),
+    "wrong-typed parsedTransaction": _json_ass.dumps(
+        {**_json_ass.loads(_good_fixture_text), "parsedTransaction": "not-an-object"}),
+    "missing rail identity": _json_ass.dumps(
+        {k: v for k, v in _json_ass.loads(_good_fixture_text).items() if k != "railIdentity"}),
+    "mainnet expected network": _fixture_text_with(("expected", "network"), "solana-mainnet-beta"),
+    "unknown expected network": _fixture_text_with(("expected", "network"), "solana-preview"),
+    "rail identity network conflict": _fixture_text_with(("railIdentity", "networkAlias"), "solana-mainnet-beta"),
+    "rail identity CAIP conflict": _fixture_text_with(("railIdentity", "caip2"), "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"),
+    "expected CAIP conflict": _fixture_text_with(("expected", "caip2"), "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"),
+    "wrong expected token program": _fixture_text_with(("expected", "tokenProgram"), "TokenzQdBNbLqP5VEhdkAS6EP8pNJGvvnzQ74d7Gkwb"),
+    "wrong expected decimals": _fixture_text_with(("expected", "decimals"), 9),
+    "wrong parsed payment mint": _fixture_text_with(("parsedTransaction", "transaction", "message", "instructions", 0, "parsed", "info", "mint"),
+                                                      "WrongAuddMint1111111111111111111111111111111"),
+    "wrong parsed balance program": _fixture_text_with(("parsedTransaction", "meta", "postTokenBalances", 0, "programId"),
+                                                        "TokenzQdBNbLqP5VEhdkAS6EP8pNJGvvnzQ74d7Gkwb"),
+    "memo instruction where the transfer should be": _json_ass.dumps(
+        _swap_only_instruction_for_memo(_json_ass.loads(_good_fixture_text))),
+    "no destination token balance": _json_ass.dumps(
+        _empty_post_token_balances(_json_ass.loads(_good_fixture_text))),
+}
+for _label, _text in _broken_fixtures.items():
+    check(f"a {_label} fixture is a server integrity failure, not a caller error",
+          _fixture_load_outcome(_text) == "integrity")
+assurance.FIXTURE_PATH = _real_fixture_path
+
+# A refusal scenario whose mutation is a no-op would present an untouched,
+# verifiable payment under a "wrong X" card and report accept for the very
+# defect it exists to demonstrate. It must refuse loudly instead.
+def _preview_outcome(fixture_doc, scenario):
+    with _tmp_ass.NamedTemporaryFile("w", suffix=".json", delete=False) as _f:
+        _f.write(_json_ass.dumps(fixture_doc))
+        _path = Path(_f.name)
+    try:
+        assurance.FIXTURE_PATH = _path
+        try:
+            return assurance.build_assurance_preview(DEF, RAID, scenario=scenario, seed=2)
+        except assurance.AssuranceIntegrityError:
+            return "integrity"
+        except Exception as exc:
+            return type(exc).__name__
+    finally:
+        assurance.FIXTURE_PATH = _real_fixture_path
+        _path.unlink()
+
+_self_custodial = _json_ass.loads(_good_fixture_text)
+_self_custodial["expected"]["authority"] = _self_custodial["expected"]["payTo"]
+_self_custodial["parsedTransaction"]["transaction"]["message"]["instructions"][0][
+    "parsed"]["info"]["authority"] = _self_custodial["expected"]["payTo"]
+check("a wrong-payee scenario that cannot be built refuses instead of reporting accept",
+      _preview_outcome(_self_custodial, "wrong-payee") == "integrity")
+_already_wrong_mint = _json_ass.loads(_good_fixture_text)
+for _node in (_already_wrong_mint["parsedTransaction"]["transaction"]["message"]["instructions"][0]["parsed"]["info"],
+              _already_wrong_mint["parsedTransaction"]["meta"]["postTokenBalances"][0],
+              _already_wrong_mint["expected"]):
+    _node["mint"] = "WrongAuddMint1111111111111111111111111111111"
+check("a wrong-mint scenario that cannot be built refuses instead of reporting accept",
+      _preview_outcome(_already_wrong_mint, "wrong-mint") == "integrity")
+# The same fixture still builds the scenarios it can honestly construct.
+check("a self-custodial fixture still serves the scenarios it can construct",
+      _preview_outcome(_self_custodial, "valid-receipt")["adapters"]["receiptIntegrity"][
+          "result"]["decision"] == "accept")
+
+# A decoy transfer ahead of the paying one must not absorb the mutation: the
+# scenario has to break the transfer the observer would otherwise accept, and
+# still refuse with its own canonical reason.
+def _with_decoy_transfer(fixture):
+    _msg = fixture["parsedTransaction"]["transaction"]["message"]
+    _msg["accountKeys"] = _msg["accountKeys"] + ["decoy-source-token-account", "decoy-dest-token-account"]
+    _msg["instructions"].insert(0, {
+        "programId": fixture["expected"]["tokenProgram"], "program": "spl-token",
+        "parsed": {"type": "transferChecked", "info": {
+            "source": "decoy-source-token-account", "destination": "decoy-dest-token-account",
+            "mint": "DecoyMint111111111111111111111111111111111",
+            "authority": "decoy-authority",
+            "tokenAmount": {"amount": "1", "decimals": 6, "uiAmountString": "0.000001"}}}})
+    fixture["parsedTransaction"]["meta"]["postTokenBalances"].append({
+        "accountIndex": len(_msg["accountKeys"]) - 1,
+        "mint": "DecoyMint111111111111111111111111111111111", "owner": "decoy-owner",
+        "programId": fixture["expected"]["tokenProgram"],
+        "uiTokenAmount": {"amount": "1", "decimals": 6, "uiAmountString": "0.000001"}})
+    return fixture
+
+for _case, _reason in assurance.SCENARIO_REFUSAL_REASON.items():
+    _decoyed = _preview_outcome(_with_decoy_transfer(_json_ass.loads(_good_fixture_text)), _case)
+    check(f"{_case} breaks the paying transfer, not a decoy ahead of it",
+          _decoyed != "integrity" and not isinstance(_decoyed, str)
+          and _decoyed["adapters"]["paymentObservation"]["result"]["reason"] == _reason
+          and _decoyed["adapters"]["receiptIntegrity"]["result"]["decision"] == "reject"
+          and _decoyed["settlement"]["decision"] == "blocked"
+          and _decoyed["receiptArtifact"]["kind"] == "invalid-candidate")
+check("a decoy fixture still accepts the scenario that needs no mutation",
+      _preview_outcome(_with_decoy_transfer(_json_ass.loads(_good_fixture_text)),
+                       "valid-receipt")["adapters"]["receiptIntegrity"]["result"]["decision"]
+      == "accept")
+# Two transfers that both satisfy the expected terms leave no single target.
+_ambiguous = _json_ass.loads(_good_fixture_text)
+_amb_msg = _ambiguous["parsedTransaction"]["transaction"]["message"]
+_amb_msg["instructions"].insert(0, _json_ass.loads(_json_ass.dumps(_amb_msg["instructions"][0])))
+check("an ambiguous fixture with two paying transfers refuses instead of guessing",
+      _preview_outcome(_ambiguous, "wrong-mint") == "integrity")
+
+# A transfer instruction with no destination account cannot have its balance
+# resolved; a null destination must never match a null-keyed balance entry.
+_no_dest = _json_ass.loads(_good_fixture_text)
+del _no_dest["parsedTransaction"]["transaction"]["message"]["instructions"][0]["parsed"]["info"]["destination"]
+_no_dest["parsedTransaction"]["meta"]["postTokenBalances"][0]["accountIndex"] = "1"
+check("a transfer with no destination account is a fixture integrity fault",
+      _fixture_load_outcome(_json_ass.dumps(_no_dest)) == "integrity")
+
+# Scenario construction reaches into parsedTransaction, so a shape defect there
+# must surface as an integrity fault, not a TypeError/IndexError that escapes
+# both /api/assurance handlers and kills the request with no HTTP response.
+for _label, _doc in (("memo where the transfer should be", _swap_only_instruction_for_memo(
+                          _json_ass.loads(_good_fixture_text))),
+                     ("no destination token balance", _empty_post_token_balances(
+                          _json_ass.loads(_good_fixture_text)))):
+    check(f"a fixture with {_label} is an integrity fault during scenario construction",
+          _preview_outcome(_doc, "wrong-mint") == "integrity")
+
+# validate_assurance is the honest-refusal entry point; it must always run its
+# own structural pass rather than accept a caller-supplied one.
+_hollow = {k: v for k, v in _valid["receipt"].items()
+           if k not in ("paymentEvidence", "settlementProgramProof", "replayIdempotency")}
+_hollow_verdict = assurance.validate_assurance(
+    _hollow, _valid["trace"], assurance._payment_for_scenario("valid-receipt"))
+check("validate_assurance cannot be told to skip its structural pass",
+      _hollow_verdict["decision"] == "reject"
+      and {"rap_receipt.payment.required", "rap_receipt.settlement.required",
+           "rap_receipt.replay.required"} <= {d["code"] for d in _hollow_verdict["diagnostics"]})
+
+# _owner_status can refuse on four dimensions; the reported `expected` value
+# must name the dimension that actually failed, not always the payee.
+_owner_cases = {
+    "wrong_mint": ("mint", ("meta", "postTokenBalances", 0, "mint")),
+    "wrong_token_program": ("tokenProgram", ("meta", "postTokenBalances", 0, "programId")),
+    "wrong_payee": ("payTo", ("meta", "postTokenBalances", 0, "owner")),
+}
+for _reason, (_expected_key, _path) in _owner_cases.items():
+    _f = _json_ass.loads(_good_fixture_text)
+    _node = _f["parsedTransaction"]
+    for _part in _path[:-1]:
+        _node = _node[_part]
+    _node[_path[-1]] = "MismatchedValue1111111111111111111111111111"
+    _res = assurance.verify_spl_transfer_checked_fixture(_f["parsedTransaction"], _f["expected"])
+    check(f"an owner-status {_reason} refusal reports the expected {_expected_key}",
+          _res["ok"] is False and _res["reason"] == _reason
+          and _res["expected"] == _f["expected"][_expected_key])
+
+# reddi.policy-decision.v1 reasonCodes are a closed upstream set
+# (packages/agent-protocol/src/policy.ts); an Arena-minted code is a malformed
+# receipt to any canonical validator.
+for _case in _assurance_cases:
+    _b = assurance.build_assurance_preview(DEF, RAID, scenario=_case, seed=2)
+    _policy = (_b["receipt"] or {}).get("policyDecision")
+    if _policy is None:
+        continue
+    check(f"policy decision for {_case} uses only canonical reason codes",
+          set(_policy["reasonCodes"]) <= assurance.CANONICAL_POLICY_REASON_CODES
+          and _policy["approvalState"] in assurance.CANONICAL_POLICY_APPROVAL_STATES
+          and _policy["approvalState"] == ("approved" if _policy["allowed"] else "denied"))
+try:
+    assurance._policy_decision(False, ["authority_scope_mismatch"])
+    _minted_ok = True
+except assurance.AssuranceIntegrityError:
+    _minted_ok = False
+check("a non-canonical policy reason code is refused, not emitted", _minted_ok is False)
+
+# A failed payment observation must not yield a receipt asserting a settlement
+# or a payment proof for the very transfer the observer rejected, and must not
+# be accused of mismatching a field that was never observed.
+for _case in ("wrong-mint", "wrong-payee"):
+    _b = assurance.build_assurance_preview(DEF, RAID, scenario=_case, seed=2)
+    _proof = _b["receipt"]["settlementProgramProof"]
+    _pay = _b["receipt"]["payment"]
+    _seen = {d["code"] for d in _b["adapters"]["receiptIntegrity"]["result"]["diagnostics"]}
+    check(f"{_case} emits an incomplete settlement proof, never a settled one",
+          _proof["confirmationStatus"] == "unverified"
+          and not {"signature", "mint", "programId", "payer", "payee", "amount"} & set(_proof)
+          and "rap_receipt.settlement.invalid" in _seen)
+    check(f"{_case} claims no payment proof and no moved amount",
+          _pay["paymentProofRef"] is None and _pay["amount"] is None
+          and "incomplete receipt candidate" in _pay["proofBoundary"])
+    check(f"{_case} paymentEvidence stays observation-only, not a restated quote",
+          _b["receipt"]["paymentEvidence"]["payee"] is None
+          and _b["receipt"]["paymentEvidence"]["amount"] is None
+          and "rap_receipt.payment.invalid" in _seen)
+    check(f"{_case} keeps the quoted terms in Arena-owned metadata instead",
+          _b["receipt"]["metadata"]["expectedPaymentTerms"]["amountBaseUnits"]
+          == assurance.load_payment_fixture()["expected"]["amountBaseUnits"])
+    check(f"{_case} is not accused of a payee mismatch that never happened",
+          "rap_receipt.settlement.payee_mismatch" not in _seen)
+    check(f"{_case} labels the emitted JSON an invalid candidate, not a receipt",
+          _b["receiptArtifact"]["kind"] == "invalid-candidate")
+_valid_observation = _valid["adapters"]["paymentObservation"]["result"]["observation"]
+check("an observed receipt binds paymentEvidence to the observed payee and amount",
+      _valid["receipt"]["paymentEvidence"]["payee"]
+      == _valid_observation["destinationOwner"]
+      and _valid["receipt"]["paymentEvidence"]["amount"]
+      == int(_valid_observation["amountBaseUnits"]))
+check("an accepted scenario is labelled a receipt and a denied one is not emitted",
+      _valid["receiptArtifact"]["kind"] == "receipt"
+      and assurance.build_assurance_preview(
+          DEF, RAID, scenario="authorization-denied", seed=2)["receiptArtifact"]["kind"]
+      == "not-emitted")
+
+# paymentEvidence.responseHash identifies an OBSERVED payment response. Hashing
+# the absent fields of an unobserved candidate produces a fixed, well-formed
+# sha256 digest that reads as evidence, so the placeholder below must never
+# appear in any emitted artifact, and no unobserved candidate may contribute a
+# responseHash join reference.
+_PLACEHOLDER_RESPONSE_HASH = assurance._hash(
+    {"signature": None, "instructionIndex": None, "amount": None, "mint": None, "payee": None})
+_PLACEHOLDER_PAYLOAD_HASH = assurance._hash({"payment": "not-observed"})
+_observed_scenarios = ("valid-receipt", "refund-gate-failed", "duplicate-replay",
+                       "tampered-trace")
+_unobserved_scenarios = ("wrong-mint", "wrong-payee")
+for _case in _observed_scenarios:
+    _b = assurance.build_assurance_preview(DEF, RAID, scenario=_case, seed=2)
+    _obs = assurance._observed_result(
+        _b["adapters"]["paymentObservation"]["result"])["observation"]
+    _hash_ok = assurance._payment_response_hash(_obs)
+    check(f"{_case} hashes the payment response it actually observed",
+          _b["receipt"]["paymentEvidence"]["responseHash"] == _hash_ok
+          and _hash_ok is not None
+          and _hash_ok != _PLACEHOLDER_RESPONSE_HASH
+          and _hash_ok in _b["receipt"]["privacyAccounting"]["joinRefs"])
+    check(f"{_case} hashes the payment payload it actually observed",
+          _b["receipt"]["paymentEvidence"]["payloadHash"] == assurance._hash(_obs)
+          and _b["receipt"]["paymentEvidence"]["payloadHash"] != _PLACEHOLDER_PAYLOAD_HASH)
+for _case in _unobserved_scenarios:
+    _b = assurance.build_assurance_preview(DEF, RAID, scenario=_case, seed=2)
+    _refs = _b["receipt"]["privacyAccounting"]["joinRefs"]
+    check(f"{_case} withholds responseHash entirely instead of hashing absent fields",
+          _b["receipt"]["paymentEvidence"]["responseHash"] is None
+          and _PLACEHOLDER_RESPONSE_HASH not in _refs
+          and len(_refs) == len(set(_refs))
+          and "rap_receipt.payment.invalid"
+          in {d["code"] for d in _b["adapters"]["receiptIntegrity"]["result"]["diagnostics"]})
+    check(f"{_case} withholds payloadHash rather than emitting a not-observed marker digest",
+          _b["receipt"]["paymentEvidence"]["payloadHash"] is None
+          and _PLACEHOLDER_PAYLOAD_HASH not in _refs
+          and _PLACEHOLDER_PAYLOAD_HASH not in _json_ass.dumps(_b["receipt"])
+          and "no verified payment observation"
+          in _b["receipt"]["payment"]["proofBoundary"])
+check("a replay ledger never lists a fabricated prior payment response hash",
+      _PLACEHOLDER_RESPONSE_HASH not in assurance.build_assurance_preview(
+          DEF, RAID, scenario="duplicate-replay", seed=2)["receipt"]
+      ["replayIdempotency"]["priorPaymentResponseHashes"])
+# Structural completeness, not mere presence, is what earns a hash: a partial
+# or null-valued observation is still an unobserved response.
+_complete_obs = assurance._observed_result(
+    _valid["adapters"]["paymentObservation"]["result"])["observation"]
+check("a partial observation earns neither evidence identifier",
+      all(assurance._payment_payload_hash(_o) is None
+          and assurance._payment_response_hash(_o) is None
+          for _o in ({}, {"payment": "not-observed"},
+                     {**_complete_obs, "signature": None},
+                     {**_complete_obs, "amountBaseUnits": ""},
+                     {k: v for k, v in _complete_obs.items() if k != "mint"}))
+      and assurance._payment_payload_hash(_complete_obs) == assurance._hash(_complete_obs))
+check("a complete canonical observation is the only thing that earns a response hash",
+      assurance._payment_response_hash(_complete_obs) is not None
+      and assurance._payment_response_hash({}) is None
+      and all(assurance._payment_response_hash({**_complete_obs, _f: None}) is None
+              for _f in ("signature", "instructionIndex", "amountBaseUnits",
+                         "mint", "destinationOwner", "schemaVersion"))
+      and all(assurance._payment_response_hash(
+                  {k: v for k, v in _complete_obs.items() if k != _f}) is None
+              for _f in ("signature", "instructionIndex", "amountBaseUnits",
+                         "mint", "destinationOwner"))
+      and assurance._payment_response_hash(
+          {**_complete_obs, "instructionIndex": 0}) is None
+      and assurance._payment_response_hash(
+          {**_complete_obs, "instructionIndex": ""}) is None
+      and assurance._payment_response_hash(
+          {**_complete_obs, "amountBaseUnits": "not-a-number"}) is None
+      and assurance._payment_response_hash(
+          {**_complete_obs, "amountBaseUnits": 2500000}) is None
+      and assurance._payment_response_hash(
+          {**_complete_obs, "schemaVersion": "some.other.v1"}) is None)
+# The receipt is emitted as JSON, so absence must survive serialization as an
+# explicit null rather than silently becoming a string.
+for _case in _observed_scenarios + _unobserved_scenarios:
+    _b = assurance.build_assurance_preview(DEF, RAID, scenario=_case, seed=2)
+    _round = _json_ass.loads(_json_ass.dumps(_b["receipt"]))
+    _observed_case = _case in _observed_scenarios
+    check(f"{_case} receipt JSON round-trips its responseHash truthfully",
+          _round["paymentEvidence"]["responseHash"]
+          == _b["receipt"]["paymentEvidence"]["responseHash"]
+          and (isinstance(_round["paymentEvidence"]["responseHash"], str)
+               if _observed_case else _round["paymentEvidence"]["responseHash"] is None)
+          and (isinstance(_round["paymentEvidence"]["payloadHash"], str)
+               if _observed_case else _round["paymentEvidence"]["payloadHash"] is None)
+          and _PLACEHOLDER_RESPONSE_HASH not in _json_ass.dumps(_round)
+          and _PLACEHOLDER_PAYLOAD_HASH not in _json_ass.dumps(_round))
+
+# A semantic refusal (failed eval, replay, tampered trace) leaves a genuinely
+# observed, canonically complete receipt. Calling that an invalid candidate
+# would erase the structural-vs-semantic distinction the preview teaches.
+for _case in ("refund-gate-failed", "duplicate-replay", "tampered-trace"):
+    _b = assurance.build_assurance_preview(DEF, RAID, scenario=_case, seed=2)
+    _art = _b["receiptArtifact"]
+    check(f"{_case} keeps its verified receipt but is never labelled accepted",
+          _art["kind"] == "verified-rejected-receipt"
+          and "not accepted" in _art["label"]
+          and _b["receipt"]["payment"]["paymentProofRef"] is not None
+          and _b["adapters"]["receiptIntegrity"]["result"]["decision"] != "accept")
+# botA == botB is reachable through the public core API and yields a `hold`.
+_held = assurance.build_assurance_preview(DEF, DEF, scenario="valid-receipt", seed=2)
+check("a held decision keeps its verified receipt and says held, not accepted",
+      _held["adapters"]["receiptIntegrity"]["result"]["decision"] == "hold"
+      and _held["receiptArtifact"]["kind"] == "verified-rejected-receipt"
+      and "held" in _held["receiptArtifact"]["label"])
+
+# replayIdempotency is the consume-once identity layer: it must extend the
+# verifier's own replay key, not restate an assumed instruction index.
+_inner_fixture = _json_ass.loads(_json_ass.dumps(assurance.load_payment_fixture()))
+_transfer_ix = _inner_fixture["parsedTransaction"]["transaction"]["message"]["instructions"].pop(0)
+_inner_fixture["parsedTransaction"]["meta"]["innerInstructions"] = [
+    {"index": 1, "instructions": [_transfer_ix]}]
+_inner = assurance.verify_spl_transfer_checked_fixture(
+    _inner_fixture["parsedTransaction"], _inner_fixture["expected"])
+check("an inner-instruction transfer is observed at its real nested index",
+      _inner["ok"] and _inner["observation"]["instructionIndex"] == "1.0"
+      and _inner["observation"]["innerInstruction"] is True
+      and _inner["replayKey"].endswith(":1.0"))
+_inner_receipt = assurance._build_receipt(
+    _valid["trace"], _inner, "valid-receipt", fixture=_inner_fixture)
+check("an inner-instruction receipt's idempotency key carries 1.0, never 0",
+      _inner_receipt["replayIdempotency"]["idempotencyKey"].startswith(_inner["replayKey"] + ":")
+      and ":0:" not in _inner_receipt["replayIdempotency"]["idempotencyKey"])
+_valid_obs = assurance._payment_for_scenario("valid-receipt")
+check("an observed receipt's idempotency key extends the verifier's replay key",
+      _valid["receipt"]["replayIdempotency"]["idempotencyKey"]
+      == f"{_valid_obs['replayKey']}:{_valid['receipt']['request']['requestId']}")
+_dup_replay = assurance.build_assurance_preview(DEF, RAID, scenario="duplicate-replay", seed=2)
+check("a replay-rejected receipt still names the first attempt's consume-once identity",
+      _dup_replay["receipt"]["replayIdempotency"]["idempotencyKey"].startswith(
+          _valid_obs["replayKey"] + ":"))
+for _case in ("wrong-mint", "wrong-payee"):
+    _b = assurance.build_assurance_preview(DEF, RAID, scenario=_case, seed=2)
+    check(f"{_case} claims no consume-once identity for a transfer never observed",
+          _b["receipt"]["replayIdempotency"]["idempotencyKey"] is None
+          and "rap_receipt.replay.invalid"
+          in {d["code"] for d in _b["adapters"]["receiptIntegrity"]["result"]["diagnostics"]})
+
+# One request reads and validates the fixture exactly once; a fixture that
+# changes mid-request cannot alter the bundle that request already committed to.
+_real_loader = assurance.load_payment_fixture
+_load_calls = []
+_mutated = _json_ass.loads(_json_ass.dumps(assurance.load_payment_fixture()))
+_mutated["expected"]["amountBaseUnits"] = "9999999"
+def _counting_loader():
+    _load_calls.append(1)
+    return _real_loader() if len(_load_calls) == 1 else _json_ass.loads(_json_ass.dumps(_mutated))
+try:
+    assurance.load_payment_fixture = _counting_loader
+    _once = assurance.build_assurance_preview(DEF, RAID, scenario="valid-receipt", seed=2)
+finally:
+    assurance.load_payment_fixture = _real_loader
+check("one preview request loads and validates the fixture exactly once",
+      len(_load_calls) == 1)
+check("a fixture changed mid-request cannot alter the committed bundle",
+      _once["receipt"] == _valid["receipt"]
+      and "9999999" not in _json_ass.dumps(_once))
+
+# The artifact classification and the public verdict must agree about which
+# receipts are structurally incomplete, for every scenario.
+_STRUCTURAL_CODES = (
+    {f"rap_receipt.{_cat}.required" for _cat in assurance.LAYER_CATEGORY.values()}
+    | {f"rap_receipt.{_cat}.invalid" for _cat in assurance.LAYER_CATEGORY.values()}
+    | set(assurance.MISSING_LAYER_CODES.values())
+    | {"rap_receipt.envelope.required"}
+) - assurance.HOLD_CODES
+for _case in _assurance_cases:
+    _b = assurance.build_assurance_preview(DEF, RAID, scenario=_case, seed=2)
+    if _b["receipt"] is None:
+        continue
+    _verdict = assurance.validate_assurance(
+        _b["receipt"], _b["trace"], assurance._payment_for_scenario(_case))
+    _has_structural = bool({d["code"] for d in _verdict["diagnostics"]} & _STRUCTURAL_CODES)
+    check(f"{_case} artifact classification agrees with the public verdict's structural view",
+          _has_structural == (_b["receiptArtifact"]["kind"] == "invalid-candidate"))
+_dup = assurance.build_assurance_preview(DEF, RAID, scenario="duplicate-replay", seed=2)
+check("duplicate-replay keeps the first observation's real settlement and rejects on replay",
+      _dup["receipt"]["settlementProgramProof"]["confirmationStatus"] == "confirmed"
+      and _dup["receipt"]["settlementProgramProof"]["mint"] == assurance.AUDD_DETERMINISTIC_FIXTURE_MINT
+      and _dup["receipt"]["payment"]["paymentProofRef"] is not None
+      and "rap_receipt.replay.duplicate_payment"
+      in {d["code"] for d in _dup["adapters"]["receiptIntegrity"]["result"]["diagnostics"]})
+
+# Missing-layer diagnostics are keyed by evidence category (with three
+# overrides), matching the canonical lab validator taxonomy consumers parse.
+_pay_ok = assurance._payment_for_scenario("valid-receipt")
+for _layer, _code in (("delegatedAuthority", "rap_receipt.authority.required"),
+                      ("serviceOutcome", "rap_receipt.service_outcome.required"),
+                      ("paymentEvidence", "rap_receipt.payment.required"),
+                      ("rollbackHold", "rap_receipt.rollback.evidence_required")):
+    _stripped = {k: v for k, v in _valid["receipt"].items() if k != _layer}
+    _diags = assurance.validate_assurance(_stripped, _valid["trace"], _pay_ok)["diagnostics"]
+    check(f"a receipt missing {_layer} emits the canonical {_code} diagnostic",
+          _diags and any(d["code"] == _code for d in _diags))
+
+# One settlement response shape regardless of scenario, so a consumer of the
+# public endpoint never has to branch on decision.
+_settlement_keys = {frozenset(assurance.build_assurance_preview(DEF, RAID, scenario=_c, seed=2)["settlement"])
+                    for _c in _assurance_cases}
+check("every assurance scenario returns one stable settlement shape", len(_settlement_keys) == 1)
+
 print("balance regression (issue B7)")
 from tools.simulate import round_robin, mirror_position_bias, powerup_impact, BANDS, ARCHETYPES
 
@@ -1651,6 +2460,11 @@ import json as _wjson
 
 _os.environ["DATA_DIR"] = _tempfile.mkdtemp(prefix="arena-waitlist-test-")
 _os.environ["ARENA_ADMIN_TOKEN"] = "test-token-123"
+# The Devnet Preview is off unless explicitly opted in on BOTH halves of the
+# gate, so this instance is the "explicitly enabled, locally declared" server;
+# the default-off instance is loaded further down.
+_os.environ["REDDI_ENABLE_SOLANA_DEVNET_ASSURANCE_PREVIEW"] = "true"
+_os.environ["REDDI_SOLANA_DEVNET_ASSURANCE_DEPLOYMENT_CONTEXT"] = "local"
 _spec = _ilu.spec_from_file_location("arena_server", ROOT / "web" / "server.py")
 _srv = _ilu.module_from_spec(_spec)
 _spec.loader.exec_module(_srv)
@@ -1674,6 +2488,547 @@ def _req(method, path, body=None, token=None):
     except _uerror.HTTPError as e:
         return e.code, _wjson.loads(e.read())
 
+
+# The preview endpoint carries its own per-client limit. The integration blocks
+# below exercise far more scenarios against one client key than an operator ever
+# would in a single window, so every enabled server they touch runs under an
+# explicit test-only allowance. The shipped default is restored and proved in
+# its own isolated section further down.
+_ASSURANCE_RATE_DEFAULT = _srv.ASSURANCE_RATE_MAX
+_ASSURANCE_RATE_TEST_ALLOWANCE = 10_000
+_assurance_rate_lifted = []
+
+
+def _lift_assurance_rate_limit(mod):
+    """Give one server module the test-only preview allowance."""
+    mod.ASSURANCE_RATE_MAX = _ASSURANCE_RATE_TEST_ALLOWANCE
+    _assurance_rate_lifted.append(mod)
+    return mod
+
+
+_lift_assurance_rate_limit(_srv)
+
+_s, _b = _req("GET", "/api/assurance/scenarios")
+check("assurance API publishes the deterministic scenario catalog",
+      _s == 200 and any(s["id"] == "valid-receipt" for s in _b["scenarios"])
+      and _b["boundary"]["rpcCall"] is False)
+_s, _b = _req("POST", "/api/assurance",
+              {"botA": "antweight-vault-defender.adl.yaml",
+               "botB": "antweight-vault-raider.adl.yaml",
+               "scenario": "wrong-mint", "seed": 2})
+check("assurance API executes refusal scenarios without ledger writes",
+      _s == 200 and _b["adapters"]["receiptIntegrity"]["result"]["decision"] == "reject"
+      and _b["settlement"]["decision"] == "blocked"
+      and not _srv.LEDGER.exists())
+_s, _b = _req("POST", "/api/assurance",
+              {"botA": "antweight-vault-defender.adl.yaml",
+               "botB": "antweight-vault-raider.adl.yaml",
+               "network": "solana-mainnet-beta"})
+check("assurance API refuses non-devnet preview requests", _s == 400)
+_s, _b = _req("POST", "/api/assurance",
+              {"botA": "antweight-vault-defender.adl.yaml",
+               "botB": "antweight-vault-raider.adl.yaml",
+               "paymentMode": "live"})
+check("assurance API refuses live payment mode", _s == 400)
+_s, _b = _req("POST", "/api/assurance",
+              {"botA": "antweight-vault-defender.adl.yaml",
+               "botB": "antweight-vault-raider.adl.yaml",
+               "wallet": True})
+check("assurance API refuses wallet/signing escalation flags", _s == 400)
+for _case, (_decision, _settle, _codes) in _assurance_cases.items():
+    _s, _b = _req("POST", "/api/assurance",
+                  {"botA": "antweight-vault-defender.adl.yaml",
+                   "botB": "antweight-vault-raider.adl.yaml",
+                   "scenario": _case, "seed": 2})
+    check(f"assurance API serves scenario {_case} as {_decision}/{_settle}",
+          _s == 200 and _b["adapters"]["receiptIntegrity"]["result"]["decision"] == _decision
+          and _b["settlement"]["decision"] == _settle)
+# Scenario defaulting is absence-only. A supplied falsey or non-string
+# scenario must be a deterministic 400, not an implicit request for the valid
+# fixture and not an unhandled TypeError from the OrderedDict lookup.
+_NO_SCENARIO = object()
+
+
+def _assurance_request_body(scenario=_NO_SCENARIO):
+    _body = {"botA": "antweight-vault-defender.adl.yaml",
+             "botB": "antweight-vault-raider.adl.yaml"}
+    if scenario is not _NO_SCENARIO:
+        _body["scenario"] = scenario
+    return _body
+
+
+_s, _b = _req("POST", "/api/assurance", _assurance_request_body())
+check("assurance API defaults to the valid fixture only when scenario is omitted",
+      _s == 200 and _b["scenario"]["id"] == "valid-receipt")
+_s, _b = _req("POST", "/api/assurance", _assurance_request_body("valid-receipt"))
+check("assurance API accepts a supplied known scenario string",
+      _s == 200 and _b["scenario"]["id"] == "valid-receipt")
+for _label, _bad in (("null", None), ("false", False), ("true", True),
+                     ("zero", 0), ("empty string", ""),
+                     ("array", ["valid-receipt"]), ("object", {"a": 1}),
+                     ("number", 7)):
+    _s, _b = _req("POST", "/api/assurance", _assurance_request_body(_bad))
+    check(f"assurance API rejects supplied malformed scenario {_label} with the canonical 400",
+          _s == 400 and _b == {"error": "scenario must be a non-empty string"}
+          and "valid-receipt" not in _wjson.dumps(_b))
+_s, _b = _req("POST", "/api/assurance", _assurance_request_body("no-such-scenario"))
+check("assurance API preserves the unknown-string scenario behavior",
+      _s == 400 and _b == {"error": "unknown scenario"}
+      and "valid-receipt" not in _wjson.dumps(_b))
+# A corrupt fixture is a server defect, not caller error: it must not be
+# reported to the client as a 400, and must not leak the fixture path.
+import tempfile as _tmp_api
+_real_path_api = _srv.assurance.FIXTURE_PATH
+with _tmp_api.NamedTemporaryFile("w", suffix=".json", delete=False) as _fh_api:
+    _fh_api.write(_real_path_api.read_text().replace(
+        assurance.AUDD_DETERMINISTIC_FIXTURE_MINT,
+        assurance.AUDD_OFFICIAL_SOLANA_MAINNET_MINT))
+    _bad_path_api = Path(_fh_api.name)
+try:
+    _srv.assurance.FIXTURE_PATH = _bad_path_api
+    _s, _b = _req("POST", "/api/assurance",
+                  {"botA": "antweight-vault-defender.adl.yaml",
+                   "botB": "antweight-vault-raider.adl.yaml",
+                   "scenario": "valid-receipt"})
+finally:
+    _srv.assurance.FIXTURE_PATH = _real_path_api
+    _bad_path_api.unlink()
+check("a corrupt preview fixture is a sanitized 500, not a client-blaming 400",
+      _s == 500 and "error" in _b
+      and str(_bad_path_api) not in _b["error"]
+      and assurance.AUDD_OFFICIAL_SOLANA_MAINNET_MINT not in _b["error"])
+_real_doc_api = _wjson.loads(_real_path_api.read_text())
+_real_doc_api["expected"]["network"] = "solana-mainnet-beta"
+with _tmp_api.NamedTemporaryFile("w", suffix=".json", delete=False) as _fh_api:
+    _wjson.dump(_real_doc_api, _fh_api)
+    _bad_path_api = Path(_fh_api.name)
+try:
+    _srv.assurance.FIXTURE_PATH = _bad_path_api
+    _s, _b = _req("POST", "/api/assurance",
+                  {"botA": "antweight-vault-defender.adl.yaml",
+                   "botB": "antweight-vault-raider.adl.yaml",
+                   "scenario": "valid-receipt"})
+finally:
+    _srv.assurance.FIXTURE_PATH = _real_path_api
+    _bad_path_api.unlink()
+check("a fixture claiming mainnet while the preview claims Devnet is a sanitized 500",
+      _s == 500 and "error" in _b
+      and str(_bad_path_api) not in _b["error"]
+      and "solana-mainnet-beta" not in _b["error"])
+
+print("Devnet Preview exposure gate (flag + deployment context, default off)")
+# The preview is fixture-only and reaches no wallet/RPC/signing/custody path,
+# but hosting it publicly is separately approval-gated
+# (docs/DEVNET-PREVIEW-RAP-ASSURANCE.md). The server therefore needs BOTH an
+# exact REDDI_ENABLE_SOLANA_DEVNET_ASSURANCE_PREVIEW opt-in value AND an exact
+# operator-declared deployment context, and fails closed on anything else, so
+# neither a typo nor an undeclared environment can expose it.
+_FLAG, _CTX = _srv.ASSURANCE_PREVIEW_FLAG, _srv.ASSURANCE_CONTEXT_VAR
+check("only the exact documented values enable the preview",
+      all(_srv.preview_enabled(_v) for _v in ("true", "1"))
+      and not any(_srv.preview_enabled(_v) for _v in
+                  (None, "", "True", "TRUE", "yes", "on", "enabled", "y",
+                   " true", "true ", "0", "false", "False", "2", 1, True)))
+check("the deployment context is a closed set; anything else reads as off",
+      [_srv.deployment_context(_v) for _v in ("off", "local", "hosted")]
+      == ["off", "local", "hosted"]
+      and all(_srv.deployment_context(_v) == "off" for _v in
+              (None, "", "Local", "LOCAL", " local", "local ", "hosted-preview",
+               "prod", "on", True, 1)))
+# Full flag x context matrix: exposure needs both halves, and externalDeployment
+# is derived from the context, never inferred when the context is unknown.
+_gate_matrix = [
+    (None, None, False, None), (None, "local", False, None),
+    (None, "hosted", False, None), ("true", None, False, None),
+    ("1", None, False, None), ("true", "off", False, None),
+    ("true", "", False, None), ("true", "Local", False, None),
+    ("true", "LOCAL", False, None), ("true", "hosted-preview", False, None),
+    ("false", "local", False, None), ("True", "local", False, None),
+    ("yes", "hosted", False, None), ("", "local", False, None),
+    ("0", "hosted", False, None), ("true", "local", True, False),
+    ("1", "local", True, False), ("true", "hosted", True, True),
+    ("1", "hosted", True, True),
+]
+check("exposure needs an exact flag AND an exact context, and derives external deployment",
+      all(_srv.preview_exposure(_f, _c) == (_on, _ext)
+          for _f, _c, _on, _ext in _gate_matrix))
+
+
+def _load_server(flag, context, label):
+    """A fresh server module loaded under one exact flag/context environment."""
+    _prior = {_k: _os.environ.get(_k) for _k in (_FLAG, _CTX, "DATA_DIR")}
+    _os.environ["DATA_DIR"] = _tempfile.mkdtemp(prefix=f"arena-{label}-test-")
+    for _k, _v in ((_FLAG, flag), (_CTX, context)):
+        if _v is None:
+            _os.environ.pop(_k, None)
+        else:
+            _os.environ[_k] = _v
+    try:
+        _sp = _ilu.spec_from_file_location("arena_server_" + label,
+                                           ROOT / "web" / "server.py")
+        _mod = _ilu.module_from_spec(_sp)
+        _sp.loader.exec_module(_mod)
+    finally:
+        for _k, _v in _prior.items():
+            if _v is None:
+                _os.environ.pop(_k, None)
+            else:
+                _os.environ[_k] = _v
+    return _mod
+
+
+def _serve(mod):
+    _h = _TServer(("127.0.0.1", 0), mod.Handler)
+    _threading.Thread(target=_h.serve_forever, daemon=True).start()
+    return _h.server_address[1]
+
+
+def _call(port, method, path, raw=None, xff=None):
+    """Raw request against a given server: returns (status, body bytes)."""
+    r = _urequest.Request(f"http://127.0.0.1:{port}{path}", method=method, data=raw)
+    if raw is not None:
+        r.add_header("Content-Type", "application/json")
+    if xff is not None:
+        r.add_header("X-Forwarded-For", xff)
+    try:
+        resp = _urequest.urlopen(r, timeout=10)
+        return resp.status, resp.read()
+    except _uerror.HTTPError as e:
+        return e.code, e.read()
+
+
+_preview_body = _wjson.dumps({"botA": "antweight-vault-defender.adl.yaml",
+                              "botB": "antweight-vault-raider.adl.yaml",
+                              "scenario": "valid-receipt"}).encode()
+# Every non-exposing environment answers exactly like the default-off one, so a
+# half-configured deploy is indistinguishable from an unknown path.
+for _label, _flag_v, _ctx_v in (("ctx-missing", "true", None),
+                                ("ctx-malformed", "true", "Local"),
+                                ("ctx-off", "1", "off"),
+                                ("flag-off-ctx-local", None, "local"),
+                                ("flag-off-ctx-hosted", "false", "hosted")):
+    _m = _load_server(_flag_v, _ctx_v, _label)
+    _p = _serve(_m)
+    _pg = _call(_p, "GET", "/play")[1].decode()
+    check(f"gate {_label}: no preview UI, no preview API, no externalDeployment claim",
+          not _m.ASSURANCE_PREVIEW_ENABLED
+          and _m.ASSURANCE_EXTERNAL_DEPLOYMENT is None
+          and 'data-panel="assurance"' not in _pg and "Devnet Preview" not in _pg
+          and _call(_p, "GET", "/api/assurance/scenarios")[0] == 404
+          and _call(_p, "POST", "/api/assurance", _preview_body)[0] == 404)
+
+# The two exposing environments differ only in the truth they may assert about
+# where they are running. Every other disclosure survives enablement.
+_srv_hosted = _lift_assurance_rate_limit(_load_server("true", "hosted", "ctx-hosted"))
+_port_hosted = _serve(_srv_hosted)
+for _mod, _mport, _name, _external in ((_srv, _port, "local", False),
+                                       (_srv_hosted, _port_hosted, "hosted", True)):
+    _cat = _wjson.loads(_call(_mport, "GET", "/api/assurance/scenarios")[1])
+    _bun = _wjson.loads(_call(_mport, "POST", "/api/assurance", _preview_body)[1])
+    check(f"gate {_name}-enabled: preview served, externalDeployment is {_external}",
+          _mod.ASSURANCE_PREVIEW_ENABLED
+          and _mod.ASSURANCE_EXTERNAL_DEPLOYMENT is _external
+          and 'data-panel="assurance"' in _mod.arena_page_bytes().decode()
+          and _cat["boundary"]["externalDeployment"] is _external
+          and _bun["boundary"]["externalDeployment"] is _external)
+    check(f"gate {_name}-enabled: every other preview disclosure still holds",
+          all(_bun["boundary"][_f] is False for _f in
+              ("deploymentPerformedByRequest", "rpcCall", "walletSigning",
+               "transactionSubmitted", "liveValue", "custody",
+               "officialMintObservation", "grantEvidence"))
+          and _bun["boundary"]["previewOnly"] is True
+          and _bun["boundary"]["cluster"] == "solana-devnet"
+          and "Devnet Preview" in _bun["label"])
+# A seed that cannot become an int — including a JSON float that overflows to
+# infinity — falls back to the default seed. It must never escape as an
+# unhandled OverflowError that drops the socket with no response at all.
+for _seed_raw in (b"1e400", b"-1e400", b"NaN", b'"twelve"', b"null", b"{}"):
+    _s_sd, _b_sd = _call(_port, "POST", "/api/assurance",
+                         b'{"botA":"antweight-vault-defender.adl.yaml",'
+                         b'"botB":"antweight-vault-raider.adl.yaml","seed":'
+                         + _seed_raw + b"}")
+    _s_sc, _b_sc = _call(_port, "POST", "/api/chain",
+                         b'{"botA":"antweight-vault-defender.adl.yaml",'
+                         b'"botB":"antweight-vault-raider.adl.yaml","seed":'
+                         + _seed_raw + b"}")
+    check(f"an unusable seed {_seed_raw!r} falls back to the default, never a dropped connection",
+          _s_sd == 200 and _s_sc == 200
+          and _wjson.loads(_b_sd)["trace"]["seed"] == 2
+          and "error" not in _wjson.loads(_b_sc))
+# A top-level array, scalar, string or null is caller error on every POST route:
+# one stable 400 before any field is read, never a dropped connection.
+for _path in ("/api/assurance", "/api/fight", "/api/draft", "/api/waitlist",
+              "/api/chain"):
+    for _raw in (b"[]", b"5", b'"x"', b"null", b"true", b'[{"botA":"x"}]'):
+        _s_nb, _b_nb = _call(_port, "POST", _path, _raw)
+        check(f"non-object body {_raw!r} to {_path} is a stable 400",
+              _s_nb == 400 and "error" in _wjson.loads(_b_nb))
+
+# A second server module loaded with the flag ABSENT is the default every
+# environment gets, including an ordinary Railway redeploy of this tree.
+_srv_off = _load_server(None, None, "preview-off")
+_port_off = _serve(_srv_off)
+
+
+def _req_off(method, path, raw=None):
+    """Raw request against the default-off server: returns (status, body bytes)."""
+    return _call(_port_off, method, path, raw)
+
+
+check("default off: the flag is absent, so the preview is disabled",
+      not _srv_off.ASSURANCE_PREVIEW_ENABLED)
+_s_off, _ = _req_off("POST", "/api/assurance",
+                     _wjson.dumps({"botA": "antweight-vault-defender.adl.yaml",
+                                   "botB": "antweight-vault-raider.adl.yaml",
+                                   "scenario": "valid-receipt"}).encode())
+check("default off: POST /api/assurance is 404, like any unknown path",
+      _s_off == 404)
+_s_off, _ = _req_off("GET", "/api/assurance/scenarios")
+check("default off: the scenario catalog is 404", _s_off == 404)
+# Route order: the gate runs BEFORE the body is parsed and before any fixture is
+# read, so a malformed or oversized body still answers 404 rather than 400/413,
+# and a corrupt fixture cannot produce a 500 from a disabled route.
+check("default off: a malformed body still gets 404, not a 400 body parse error",
+      _req_off("POST", "/api/assurance", b"{not json")[0] == 404)
+check("default off: an oversized body still gets 404, not 413",
+      _req_off("POST", "/api/assurance",
+               b'{"x":"' + b"z" * (70 * 1024) + b'"}')[0] == 404)
+_real_off = _srv_off.assurance.FIXTURE_PATH
+try:
+    _srv_off.assurance.FIXTURE_PATH = Path("/nonexistent/assurance-fixture.json")
+    _s_off, _ = _req_off("POST", "/api/assurance", b'{"scenario":"valid-receipt"}')
+finally:
+    _srv_off.assurance.FIXTURE_PATH = _real_off
+check("default off: no fixture is read, so a broken fixture is still 404",
+      _s_off == 404)
+# UI absence: the tab, the panel and every client-side hook are removed from the
+# served document, not merely hidden with CSS.
+_s_off, _page_off = _req_off("GET", "/play")
+_page_off = _page_off.decode()
+check("default off: /play omits the Devnet Preview tab, panel and client code",
+      _s_off == 200
+      and 'data-panel="assurance"' not in _page_off
+      and 'id="assurance"' not in _page_off
+      and "Devnet Preview" not in _page_off
+      and "/api/assurance" not in _page_off
+      and "bootAssurance" not in _page_off)
+check("default off: the rest of the arena page is untouched",
+      all(f'data-panel="{_t}"' in _page_off
+          for _t in ("fight", "market", "board", "build", "chain"))
+      and 'id="fightBtn"' in _page_off)
+check("default off: /index.html serves the same stripped arena page",
+      _req_off("GET", "/index.html")[1].decode() == _page_off)
+# Stripping is fail-loud: an unpaired marker is a defect, never a page that is
+# half-stripped and still wired to a removed panel.
+_unpaired = 0
+for _frag in ("<!-- devnet-preview:begin -->x", "x<!-- devnet-preview:end -->",
+              "/* devnet-preview:begin */x", "x/* devnet-preview:end */"):
+    try:
+        _srv_off.strip_preview_markup(_frag)
+    except RuntimeError:
+        _unpaired += 1
+check("an unpaired preview marker raises instead of serving a broken page",
+      _unpaired == 4)
+# Deploy config: neither half of the gate is configured by the image or the
+# Railway service definition, so an ordinary redeploy of this tree keeps the
+# preview off. The image does ship the fixtures the preview needs once an
+# operator opts in. Both are checked against a normalized model of what the
+# builder actually does with these files, not against their text — an
+# equivalent rewrite of either file must keep these checks green.
+import fnmatch as _fnmatch
+
+_railway = _wjson.loads((ROOT / "railway.json").read_text())
+_railway_vars = dict(_railway.get("variables") or {})
+for _sect in ("build", "deploy"):
+    _railway_vars.update((_railway.get(_sect) or {}).get("variables") or {})
+
+
+def _dockerfile_instructions(text):
+    """Dockerfile as (INSTRUCTION, argument) pairs, continuations joined."""
+    _out, _buf = [], ""
+    for _line in text.splitlines():
+        _s = _line.strip()
+        if not _s or _s.startswith("#"):
+            continue
+        if _s.endswith("\\"):
+            _buf += _s[:-1].strip() + " "
+            continue
+        _s, _buf = (_buf + _s).strip(), ""
+        _instr, _, _arg = _s.partition(" ")
+        _out.append((_instr.upper(), _arg.strip()))
+    return _out
+
+
+def _pattern_matches(pattern, path):
+    """One .dockerignore pattern against a path: segment-wise, a directory
+    pattern matching every path beneath it, and `*` never crossing a `/`."""
+    _pp, _tp = pattern.split("/"), path.split("/")
+    return (len(_pp) <= len(_tp)
+            and all(_fnmatch.fnmatch(_t, _p) for _p, _t in zip(_pp, _tp)))
+
+
+def _ignored(patterns, path):
+    """Docker's .dockerignore semantics: last matching pattern wins, ! re-includes."""
+    _excluded = False
+    for _raw in patterns:
+        _pat = _raw.strip()
+        if not _pat or _pat.startswith("#"):
+            continue
+        _negate = _pat.startswith("!")
+        _pat = _pat.lstrip("!").strip().rstrip("/")
+        if _pat and _pattern_matches(_pat, path):
+            _excluded = not _negate
+    return _excluded
+
+
+def _copy_sources(arg):
+    """Every source of one COPY: all operands but the destination, flags dropped."""
+    return [_t for _t in arg.split() if not _t.startswith("--")][:-1]
+
+
+def _in_build_context(instructions, patterns, path):
+    """True when `path` is copied into the image and not ignored out of it."""
+    _copied = any(path == _src or path.startswith(_src.rstrip("/") + "/")
+                  for _instr, _arg in instructions if _instr == "COPY"
+                  for _src in _copy_sources(_arg))
+    return _copied and not _ignored(patterns, path)
+
+
+def _env_assignments(instructions):
+    """ENV/ARG instructions as the name -> value mapping they bake into the image."""
+    _vars = {}
+    for _instr, _arg in instructions:
+        if _instr not in ("ENV", "ARG") or not _arg:
+            continue
+        if "=" in _arg:
+            for _tok in _arg.split():
+                _k, _, _v = _tok.partition("=")
+                _vars[_k] = _v.strip('"\'')
+        else:
+            _k, _, _v = _arg.partition(" ")
+            _vars[_k] = _v.strip().strip('"\'')
+    return _vars
+
+
+_instructions = _dockerfile_instructions((ROOT / "Dockerfile").read_text())
+_ignore_patterns = (ROOT / ".dockerignore").read_text().splitlines()
+# The environment an ordinary redeploy of this tree hands the process: every
+# variable the image bakes in plus every variable the service definition sets.
+# Feeding it through the real gate is the evidence that nothing shipped here
+# enables the preview or declares the approval-gated hosted context.
+_shipped_env = dict(_railway_vars)
+_shipped_env.update(_env_assignments(_instructions))
+check("an ordinary Railway redeploy ships neither gate variable, so no hosted declaration exists",
+      _srv.ASSURANCE_PREVIEW_FLAG not in _shipped_env
+      and _srv.ASSURANCE_CONTEXT_VAR not in _shipped_env
+      and "hosted" not in _shipped_env.values())
+check("the environment an ordinary redeploy ships does not expose the preview",
+      _srv.preview_exposure(_shipped_env.get(_srv.ASSURANCE_PREVIEW_FLAG),
+                            _shipped_env.get(_srv.ASSURANCE_CONTEXT_VAR)) == (False, None))
+_fixture_rel = str(assurance.FIXTURE_PATH.relative_to(ROOT))
+check("the image build context includes the assurance fixtures the preview needs",
+      assurance.FIXTURE_PATH.exists()
+      and _in_build_context(_instructions, _ignore_patterns, _fixture_rel))
+# The ignore model is only evidence if it can say no: the excluded trees the
+# image deliberately drops must still resolve as excluded.
+check("the build-context model still excludes what the image drops",
+      not any(_in_build_context(_instructions, _ignore_patterns, _p)
+              for _p in ("tests/test_arena.py", "docs/OPERATIONS.md",
+                         "core/waitlist.json", "fixtures/other/thing.json")))
+
+print("Devnet Preview rate limit")
+# /api/assurance runs the heaviest work on the unauthenticated surface (a vault
+# match, weigh-ins, a fixture load with full rail-identity validation, a receipt
+# build and two validation passes), so an enabled instance bounds it per client
+# in its own bucket. This is a courtesy limit on a spoofable client key, not
+# DDoS protection. A malformed body is the cheap probe: it never reaches
+# fixture or match work, so a 400 proves the limiter admitted the call and a
+# 429 proves it refused before the body was even parsed.
+for _rl_lifted in _assurance_rate_lifted:
+    _rl_lifted.ASSURANCE_RATE_MAX = _ASSURANCE_RATE_DEFAULT
+_rl_mods = {}
+for _ctx in ("local", "hosted"):
+    _rl_m = _load_server("true", _ctx, "rate-limit-" + _ctx)
+    _rl_p = _serve(_rl_m)
+    _rl_mods[_ctx] = (_rl_m, _rl_p)
+    _rl_n = _rl_m.ASSURANCE_RATE_MAX
+    _rl_codes = [_call(_rl_p, "POST", "/api/assurance", b"{not json")[0]
+                 for _ in range(_rl_n + 1)]
+    check(f"the shipped preview limit admits exactly 20 {_ctx} requests, then 429s",
+          _rl_m.ASSURANCE_PREVIEW_ENABLED and _rl_n == 20
+          and _rl_codes[:-1] == [400] * _rl_n and _rl_codes[-1] == 429)
+_rl_mod, _rl_port = _rl_mods["local"]
+_rl_limit = _rl_mod.ASSURANCE_RATE_MAX
+_s_rl, _b_rl = _call(_rl_port, "POST", "/api/assurance", _preview_body)
+check("an over-limit preview request gets the stable sanitized 429 contract",
+      _s_rl == 429 and _wjson.loads(_b_rl) == {"error": "rate limited"})
+# The limiter short-circuits before the fixture is touched. The sabotaged
+# fixture is the probe, and the admitted request is its disconfirming control:
+# the same broken path answers with the sanitized 500 the moment the limiter
+# lets a call through, so the 429 above it is evidence of a read that did not
+# happen rather than a trivially true code.
+_real_rl = _rl_mod.assurance.FIXTURE_PATH
+_rl_window = _rl_mod.SIGNUP_RATE_WINDOW
+try:
+    _rl_mod.assurance.FIXTURE_PATH = Path("/nonexistent/assurance-fixture.json")
+    _s_rl, _b_rl = _call(_rl_port, "POST", "/api/assurance", _preview_body)
+    _rl_mod.SIGNUP_RATE_WINDOW = 0.0
+    _s_rl_ctl, _b_rl_ctl = _call(_rl_port, "POST", "/api/assurance", _preview_body)
+finally:
+    _rl_mod.assurance.FIXTURE_PATH = _real_rl
+    _rl_mod.SIGNUP_RATE_WINDOW = _rl_window
+check("a rate-limited preview request reads no fixture, unlike an admitted one",
+      _s_rl == 429 and _wjson.loads(_b_rl) == {"error": "rate limited"}
+      and _s_rl_ctl == 500
+      and "unavailable" in _wjson.loads(_b_rl_ctl)["error"])
+check("a rate-limited preview response carries no assurance work product",
+      set(_wjson.loads(_b_rl)) == {"error"}
+      and not {"receipt", "trace", "scenario", "adapters", "settlement"}
+      & set(_wjson.loads(_b_rl)))
+# It is a fixed window, not a permanent lockout: once the recorded hits fall
+# outside it the same client is served again.
+try:
+    _rl_mod.SIGNUP_RATE_WINDOW = 0.0
+    _s_rl, _b_rl = _call(_rl_port, "POST", "/api/assurance", _preview_body)
+finally:
+    _rl_mod.SIGNUP_RATE_WINDOW = _rl_window
+check("the preview limit resets with its window instead of locking the client out",
+      _s_rl == 200 and _wjson.loads(_b_rl)["scenario"]["id"] == "valid-receipt")
+# Buckets are per endpoint: exhausting the preview must not lock a player out
+# of the match endpoint, which carries its own separate budget.
+for _ in range(_rl_limit + 1):
+    _call(_rl_port, "POST", "/api/assurance", b"{not json")
+_s_rl_f, _b_rl_f = _call(_rl_port, "POST", "/api/fight", _preview_body)
+check("exhausting the preview bucket leaves the match endpoint's own bucket intact",
+      _call(_rl_port, "POST", "/api/assurance", _preview_body)[0] == 429
+      and _s_rl_f == 200 and "winner" in _wjson.loads(_b_rl_f))
+# Buckets are per client too: one exhausted forwarded client must not spend
+# another client's preview budget.
+_rl_ind_mod = _load_server("true", "local", "rate-limit-clients")
+_rl_ind_port = _serve(_rl_ind_mod)
+_rl_ind_codes = [_call(_rl_ind_port, "POST", "/api/assurance", b"{not json", xff="9.9.9.9")[0]
+                 for _ in range(_rl_ind_mod.ASSURANCE_RATE_MAX + 1)]
+check("exhausting one forwarded client's preview budget leaves other clients served",
+      _rl_ind_codes[-1] == 429
+      and _call(_rl_ind_port, "POST", "/api/assurance", b"{not json", xff="8.8.8.8")[0] == 400
+      and _call(_rl_ind_port, "POST", "/api/assurance", b"{not json")[0] == 400)
+# The disabled route is decided before the limiter, so a flood against a
+# default-off deploy stays indistinguishable from an unknown path and never
+# allocates a bucket for it.
+_rl_off_mod = _load_server(None, None, "rate-limit-off")
+_rl_off_port = _serve(_rl_off_mod)
+_rl_off_codes = {_call(_rl_off_port, "POST", "/api/assurance", _preview_body)[0]
+                 for _ in range(_rl_off_mod.ASSURANCE_RATE_MAX + 5)}
+check("a disabled preview route stays 404 under a flood and allocates no bucket",
+      _rl_off_codes == {404}
+      and not any(_k.startswith("assurance:") for _k in _rl_off_mod._SIGNUP_HITS))
+# The limiter map the preview shares is the same hard-capped LRU as every other
+# bucket, so a rotated client key cannot grow it without bound.
+_rl_mod.MAX_RATE_KEYS = 50
+for _k in range(500):
+    _rl_mod._rate_ok(f"assurance:rot-{_k}", limit=_rl_mod.ASSURANCE_RATE_MAX)
+check("the preview bucket cannot grow the rate-limit map past its hard cap",
+      len(_rl_mod._SIGNUP_HITS) <= 50)
 
 _s, _b = _req("POST", "/api/waitlist", {"email": "Player@Example.com", "roles": ["compete"]})
 check("waitlist signup works and normalizes case", _s == 200 and _b["ok"] and _b["position"] == 1)

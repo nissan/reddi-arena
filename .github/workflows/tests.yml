@@ -1,5 +1,6 @@
 # F3 (T-092): CI gate — fails on vendored-schema drift, ADL forks, or any
-# red test. Runs the same three commands CLAUDE.md requires before any PR.
+# red test. Runs the commands AGENTS.md requires before any PR, plus the
+# claims lint.
 name: tests
 on:
   push:
