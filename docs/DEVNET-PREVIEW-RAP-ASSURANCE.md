@@ -177,12 +177,13 @@ With the preview off:
   is parsed and before any fixture is read.
 
 So an ordinary redeploy of this tree — including the operator's existing Railway
-service (`docs/OPERATIONS.md` owns both variables and the deploy steps) — does
-not expose the preview: neither the image nor the service definition sets
-either variable. Enabling it is a separate, operator-approved action with its
-own reviewed messaging, and selecting `hosted` needs that approval explicitly,
-because enabling the preview on an externally hosted service exposes it
-publicly — the "externally hosted launch" that stays separately approval-gated.
+service (`docs/OPERATIONS.md` owns the deploy steps and the variable
+inventory) — does not expose the preview: neither the image nor the service
+definition sets either variable. Enabling it is a separate, operator-approved
+action with its own reviewed messaging, and selecting `hosted` needs that
+approval explicitly, because enabling the preview on an externally hosted
+service exposes it publicly — the "externally hosted launch" that stays
+separately approval-gated.
 Every other boundary in the table above still holds when the preview is on — it
 remains fixture-only, with no wallet, RPC, signing, submission, or custody path
 — so enabling it exposes the preview, never live value.
