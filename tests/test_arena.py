@@ -1603,11 +1603,27 @@ check("valid assurance receipt uses canonical RAP receipt/policy versions",
       and _valid["receipt"]["policyDecision"]["schemaVersion"] == "reddi.policy-decision.v1")
 check("valid assurance payment observation is fixture-backed and never grant evidence",
       _valid["adapters"]["paymentObservation"]["result"]["observation"]["evidence"]
-      == {"source": "parsed-transaction-fixture", "grantEligible": False,
-          "railEnvironment": "deterministic-fixture",
-          "railStatus": "deterministic-fixture-only",
-          "grantEligibility": "non_eligible",
-          "evidenceEnvironment": "deterministic-fixture"})
+      == {"source": "parsed-transaction-fixture", "grantEligible": False})
+
+# reddi.svm-spl-transfer-checked-observation.v1 declares an exact member set
+# (packages/x402-solana/src/spl-token-observer.ts); Arena disclosure must not
+# widen a document that advertises a canonical schemaVersion.
+_CANONICAL_OBSERVATION_KEYS = {
+    "schemaVersion", "verifierVersion", "network", "signature", "slot", "blockTime",
+    "commitment", "instructionIndex", "innerInstruction", "sourceTokenAccount",
+    "destinationTokenAccount", "destinationOwner", "authority", "mint", "tokenProgram",
+    "amountBaseUnits", "decimals", "memo", "paymentIntentId", "evidence",
+}
+_obs = _valid["adapters"]["paymentObservation"]["result"]["observation"]
+check("the emitted observation carries no member outside the canonical v1 schema",
+      _obs["schemaVersion"] == "reddi.svm-spl-transfer-checked-observation.v1"
+      and set(_obs) <= _CANONICAL_OBSERVATION_KEYS
+      and set(_obs["evidence"]) == {"source", "grantEligible"})
+_labels = _valid["adapters"]["paymentObservation"]["arenaPreviewLabels"]
+check("preview environment/eligibility disclosure lives in an Arena-owned object",
+      _labels["schemaVersion"] == assurance.ARENA_PREVIEW_LABELS_VERSION
+      and _labels["environment"] == "deterministic-fixture"
+      and _labels["eligibility"] == "non_eligible")
 check("assurance preview explains payment transfer is not paid work proof",
       any(a["id"] == "rap-assurance-paid-work" and "Payment alone" in a["boundary"]
           for a in _valid["assertions"]))
@@ -1628,7 +1644,38 @@ _official_expected = dict(assurance.load_payment_fixture()["expected"],
 _official = assurance.verify_spl_transfer_checked_fixture(
     assurance.load_payment_fixture()["parsedTransaction"], _official_expected)
 check("fixture verifier refuses an expectation naming the official AUDD mainnet mint",
-      _official["ok"] is False and _official["reason"] == "official_mint_blocked")
+      _official["ok"] is False and _official["reason"] == "wrong_mint"
+      and _official["arenaRefusal"] == "official_mint_blocked"
+      and assurance.AUDD_OFFICIAL_SOLANA_MAINNET_MINT not in _json_ass.dumps(_official))
+# The refusal must also cover the observed side: a parsed transaction carrying
+# the official mint must not reach candidate matching, which would echo it back
+# through the adapter result as an "actual" value.
+_official_parsed = _json_ass.loads(
+    _json_ass.dumps(assurance.load_payment_fixture()["parsedTransaction"]).replace(
+        assurance.AUDD_DETERMINISTIC_FIXTURE_MINT,
+        assurance.AUDD_OFFICIAL_SOLANA_MAINNET_MINT))
+_official_actual = assurance.verify_spl_transfer_checked_fixture(
+    _official_parsed, assurance.load_payment_fixture()["expected"])
+check("fixture verifier refuses a parsed transaction carrying the official mint, without echoing it",
+      _official_actual["ok"] is False and _official_actual["reason"] == "wrong_mint"
+      and _official_actual["arenaRefusal"] == "official_mint_blocked"
+      and assurance.AUDD_OFFICIAL_SOLANA_MAINNET_MINT not in _json_ass.dumps(_official_actual))
+
+# Observation failure reasons are a closed upstream union; an Arena-specific
+# refusal travels beside it, never inside it.
+for _case in _assurance_cases:
+    _res = assurance.build_assurance_preview(DEF, RAID, scenario=_case, seed=2)[
+        "adapters"]["paymentObservation"]["result"]
+    check(f"payment observation for {_case} keeps reason inside the canonical union",
+          "reason" not in _res
+          or _res["reason"] in assurance.CANONICAL_OBSERVATION_FAILURE_REASONS)
+try:
+    assurance._payment_failure("official_mint_blocked", "minted reason")
+    _minted_reason_ok = True
+except assurance.AssuranceIntegrityError:
+    _minted_reason_ok = False
+check("a non-canonical observation failure reason is refused, not emitted",
+      _minted_reason_ok is False)
 import tempfile as _tmp_ass
 _real_fixture_path = assurance.FIXTURE_PATH
 with _tmp_ass.NamedTemporaryFile("w", suffix=".json", delete=False) as _fh:
@@ -1641,7 +1688,7 @@ try:
     try:
         assurance.load_payment_fixture()
         _fixture_refused = False
-    except ValueError:
+    except assurance.AssuranceIntegrityError:
         _fixture_refused = True
 finally:
     assurance.FIXTURE_PATH = _real_fixture_path
@@ -1664,25 +1711,39 @@ for _case in _assurance_cases:
 try:
     assurance._policy_decision(False, ["authority_scope_mismatch"])
     _minted_ok = True
-except ValueError:
+except assurance.AssuranceIntegrityError:
     _minted_ok = False
 check("a non-canonical policy reason code is refused, not emitted", _minted_ok is False)
 
-# A failed payment observation must not yield a receipt asserting a confirmed
-# settlement of the very transfer the observer rejected.
+# A failed payment observation must not yield a receipt asserting a settlement
+# or a payment proof for the very transfer the observer rejected, and must not
+# be accused of mismatching a field that was never observed.
 for _case in ("wrong-mint", "wrong-payee"):
     _b = assurance.build_assurance_preview(DEF, RAID, scenario=_case, seed=2)
     _proof = _b["receipt"]["settlementProgramProof"]
+    _pay = _b["receipt"]["payment"]
     _seen = {d["code"] for d in _b["adapters"]["receiptIntegrity"]["result"]["diagnostics"]}
-    check(f"{_case} receipt reports an unverified settlement, not a confirmed one",
+    check(f"{_case} emits an incomplete settlement proof, never a settled one",
           _proof["confirmationStatus"] == "unverified"
-          and _proof["mint"] == "unobserved" and _proof["payee"] == "unobserved"
-          and "rap_receipt.settlement.unconfirmed" in _seen
-          and "rap_receipt.settlement.payee_mismatch" in _seen)
+          and not {"signature", "mint", "programId", "payer", "payee", "amount"} & set(_proof)
+          and "rap_receipt.settlement.invalid" in _seen)
+    check(f"{_case} claims no payment proof and no moved amount",
+          _pay["paymentProofRef"] is None and _pay["amount"] is None
+          and "incomplete receipt candidate" in _pay["proofBoundary"])
+    check(f"{_case} is not accused of a payee mismatch that never happened",
+          "rap_receipt.settlement.payee_mismatch" not in _seen)
+    check(f"{_case} labels the emitted JSON an invalid candidate, not a receipt",
+          _b["receiptArtifact"]["kind"] == "invalid-candidate")
+check("an accepted scenario is labelled a receipt and a denied one is not emitted",
+      _valid["receiptArtifact"]["kind"] == "receipt"
+      and assurance.build_assurance_preview(
+          DEF, RAID, scenario="authorization-denied", seed=2)["receiptArtifact"]["kind"]
+      == "not-emitted")
 _dup = assurance.build_assurance_preview(DEF, RAID, scenario="duplicate-replay", seed=2)
 check("duplicate-replay keeps the first observation's real settlement and rejects on replay",
       _dup["receipt"]["settlementProgramProof"]["confirmationStatus"] == "confirmed"
       and _dup["receipt"]["settlementProgramProof"]["mint"] == assurance.AUDD_DETERMINISTIC_FIXTURE_MINT
+      and _dup["receipt"]["payment"]["paymentProofRef"] is not None
       and "rap_receipt.replay.duplicate_payment"
       in {d["code"] for d in _dup["adapters"]["receiptIntegrity"]["result"]["diagnostics"]})
 
@@ -1852,6 +1913,28 @@ for _bad in ({"a": 1}, ["valid-receipt"], 7, True, "no-such-scenario"):
                    "scenario": _bad})
     check(f"assurance API rejects scenario {_bad!r} with a clean 400",
           _s == 400 and "error" in _b)
+# A corrupt fixture is a server defect, not caller error: it must not be
+# reported to the client as a 400, and must not leak the fixture path.
+import tempfile as _tmp_api
+_real_path_api = _srv.assurance.FIXTURE_PATH
+with _tmp_api.NamedTemporaryFile("w", suffix=".json", delete=False) as _fh_api:
+    _fh_api.write(_real_path_api.read_text().replace(
+        assurance.AUDD_DETERMINISTIC_FIXTURE_MINT,
+        assurance.AUDD_OFFICIAL_SOLANA_MAINNET_MINT))
+    _bad_path_api = Path(_fh_api.name)
+try:
+    _srv.assurance.FIXTURE_PATH = _bad_path_api
+    _s, _b = _req("POST", "/api/assurance",
+                  {"botA": "antweight-vault-defender.adl.yaml",
+                   "botB": "antweight-vault-raider.adl.yaml",
+                   "scenario": "valid-receipt"})
+finally:
+    _srv.assurance.FIXTURE_PATH = _real_path_api
+    _bad_path_api.unlink()
+check("a corrupt preview fixture is a sanitized 500, not a client-blaming 400",
+      _s == 500 and "error" in _b
+      and str(_bad_path_api) not in _b["error"]
+      and assurance.AUDD_OFFICIAL_SOLANA_MAINNET_MINT not in _b["error"])
 
 _s, _b = _req("POST", "/api/waitlist", {"email": "Player@Example.com", "roles": ["compete"]})
 check("waitlist signup works and normalizes case", _s == 200 and _b["ok"] and _b["position"] == 1)

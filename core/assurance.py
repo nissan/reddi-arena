@@ -85,7 +85,39 @@ CANONICAL_POLICY_REASON_CODES = frozenset(
 )
 CANONICAL_POLICY_APPROVAL_STATES = frozenset({"approved", "denied", "requires_operator_approval"})
 
-UNOBSERVED = "unobserved"
+# Closed set from SplTransferCheckedObservationFailureReason in
+# nissan/reddi-agent-protocol/packages/x402-solana/src/spl-token-observer.ts.
+# An Arena-specific refusal travels in `arenaRefusal`, never in `reason`.
+CANONICAL_OBSERVATION_FAILURE_REASONS = frozenset(
+    {
+        "malformed_expected_payment",
+        "missing_transaction",
+        "failed_transaction",
+        "missing_confirmation_metadata",
+        "wrong_signature",
+        "no_transfer_checked",
+        "wrong_token_program",
+        "wrong_mint",
+        "wrong_amount",
+        "wrong_payee",
+        "wrong_destination",
+        "wrong_decimals",
+        "wrong_authority",
+        "duplicate_matching_transfer",
+        "missing_memo",
+        "memo_mismatch",
+        "replay_detected",
+    }
+)
+
+# Arena-owned preview disclosure. It is deliberately NOT part of any canonical
+# RAP/x402 document; the label vocabulary reuses ReddiPaymentRecordLabels
+# (packages/agent-protocol/src/payment-records.ts) so it stays comparable.
+ARENA_PREVIEW_LABELS_VERSION = "reddi.arena.devnet-preview-labels.v1"
+
+
+class AssuranceIntegrityError(ValueError):
+    """A server-side fixture or canonicality defect, never caller input."""
 
 CANONICAL_REFS = {
     "adl": "vendor/ADL-v0.2.schema.json (pinned from reddiagent-lab)",
@@ -295,10 +327,25 @@ def scenario_catalog() -> dict:
     }
 
 
+def _official_mint_present(obj: Any) -> bool:
+    return AUDD_OFFICIAL_SOLANA_MAINNET_MINT in json.dumps(obj, default=str)
+
+
+def preview_labels() -> dict:
+    """Arena-owned Devnet Preview disclosure, outside every canonical schema."""
+    return {
+        "schemaVersion": ARENA_PREVIEW_LABELS_VERSION,
+        "environment": AUDD_FIXTURE_RAIL["evidenceEnvironment"],
+        "eligibility": AUDD_FIXTURE_RAIL["grantEligibility"],
+        "railStatus": AUDD_FIXTURE_RAIL["status"],
+        "boundary": "Arena preview disclosure; not a field of any canonical RAP or x402 document",
+    }
+
+
 def load_payment_fixture() -> dict:
     fixture = json.loads(FIXTURE_PATH.read_text())
-    if AUDD_OFFICIAL_SOLANA_MAINNET_MINT in json.dumps(fixture):
-        raise ValueError(
+    if _official_mint_present(fixture):
+        raise AssuranceIntegrityError(
             "Devnet preview fixtures must never carry the official AUDD mainnet mint; "
             f"use {AUDD_DETERMINISTIC_FIXTURE_MINT}"
         )
@@ -464,13 +511,26 @@ def _candidate_matches(candidate: dict, expected: dict) -> bool:
     return True
 
 
-def _payment_failure(reason: str, message: str, expected: Any = None, actual: Any = None) -> dict:
+def _payment_failure(reason: str, message: str, expected: Any = None, actual: Any = None,
+                     arena_refusal: str | None = None) -> dict:
+    if reason not in CANONICAL_OBSERVATION_FAILURE_REASONS:
+        raise AssuranceIntegrityError(
+            f"{SPL_OBSERVATION_SCHEMA_VERSION} failure reasons must come from the canonical closed set; "
+            f"got {reason}"
+        )
     out = {"ok": False, "reason": reason, "message": message}
     if expected is not None:
         out["expected"] = expected
     if actual is not None:
         out["actual"] = actual
+    if arena_refusal is not None:
+        out["arenaRefusal"] = arena_refusal
     return out
+
+
+def _no_payment_attempt(arena_refusal: str, message: str) -> dict:
+    """No observation logic ran, so there is no canonical failure reason to give."""
+    return {"ok": False, "observationAttempted": False, "arenaRefusal": arena_refusal, "message": message}
 
 
 def _candidate_failure(candidates: list[dict], expected: dict) -> dict:
@@ -542,12 +602,12 @@ def _validate_expected(expected: dict, commitment: str) -> dict | None:
         return _payment_failure("malformed_expected_payment", "expected payment terms are incomplete")
     if not expected["amountBaseUnits"].isdigit() or expected["amountBaseUnits"].startswith("0"):
         return _payment_failure("malformed_expected_payment", "expected amount must be a positive integer base-unit string")
-    if AUDD_OFFICIAL_SOLANA_MAINNET_MINT in (expected["mint"], expected.get("tokenProgram")):
+    if _official_mint_present(expected):
         return _payment_failure(
-            "official_mint_blocked",
+            "wrong_mint",
             "the official AUDD mainnet mint may never be observed by the fixture-only Devnet Preview",
             AUDD_DETERMINISTIC_FIXTURE_MINT,
-            expected["mint"],
+            arena_refusal="official_mint_blocked",
         )
     if commitment not in ("confirmed", "finalized"):
         return _payment_failure("missing_confirmation_metadata", "commitment must be confirmed or finalized")
@@ -573,6 +633,13 @@ def verify_spl_transfer_checked_fixture(
     meta = _as_dict(parsed.get("meta"))
     if not parsed or not meta:
         return _payment_failure("missing_transaction", "parsed transaction metadata is required")
+    if _official_mint_present(parsed):
+        return _payment_failure(
+            "wrong_mint",
+            "the official AUDD mainnet mint may never appear in a Devnet Preview fixture transaction",
+            AUDD_DETERMINISTIC_FIXTURE_MINT,
+            arena_refusal="official_mint_blocked",
+        )
     if meta.get("err") not in (None, False):
         return _payment_failure("failed_transaction", "transaction metadata reports failure", None, meta.get("err"))
     if not _positive_int(parsed.get("slot")):
@@ -636,10 +703,6 @@ def verify_spl_transfer_checked_fixture(
             "evidence": {
                 "source": "parsed-transaction-fixture",
                 "grantEligible": False,
-                "railEnvironment": AUDD_FIXTURE_RAIL["environment"],
-                "railStatus": AUDD_FIXTURE_RAIL["status"],
-                "grantEligibility": AUDD_FIXTURE_RAIL["grantEligibility"],
-                "evidenceEnvironment": AUDD_FIXTURE_RAIL["evidenceEnvironment"],
             },
         },
         "replayKey": replay_key,
@@ -649,7 +712,7 @@ def verify_spl_transfer_checked_fixture(
 def _policy_decision(allowed: bool, reason_codes: list[str], quote: dict | None = None) -> dict:
     unknown = sorted(code for code in reason_codes if code not in CANONICAL_POLICY_REASON_CODES)
     if unknown:
-        raise ValueError(
+        raise AssuranceIntegrityError(
             f"{RAP_POLICY_DECISION_SCHEMA_VERSION} reasonCodes must come from the canonical closed set; "
             f"got {', '.join(unknown)}"
         )
@@ -690,24 +753,18 @@ def _request_envelope(trace: dict, scenario: str) -> dict:
     }
 
 
-def _settlement_proof(expected: dict, observation: dict, amount: int) -> dict:
-    """Settlement proof bound to the payment observation, never to expectations.
+def _settlement_proof(observation: dict) -> dict:
+    """Settlement proof built only from the payment observation.
 
-    Without a verified observation there is nothing settled to prove, so the
-    observed fields read `unobserved` and the confirmation reads `unverified`.
-    That keeps the layer structurally present while the canonical
-    `rap_receipt.settlement.unconfirmed` / `.payee_mismatch` diagnostics fire.
+    Without a verified observation nothing settled, so every observable field
+    is absent rather than restated from the expected payment terms. The layer
+    is then an incomplete evidence layer, which is what
+    `rap_receipt.settlement.invalid` truthfully reports.
     """
     if not observation:
         return {
             "cluster": "solana-devnet fixture",
-            "signature": UNOBSERVED,
-            "mint": UNOBSERVED,
-            "programId": expected["tokenProgram"],
             "confirmationStatus": "unverified",
-            "payer": UNOBSERVED,
-            "payee": UNOBSERVED,
-            "amount": amount,
         }
     return {
         "cluster": "solana-devnet fixture",
@@ -747,14 +804,14 @@ def _build_receipt(
     response_hash = trace["traceHash"]
     eval_report_hash = _hash({"gate": "vault-trace-determinism", "traceHash": response_hash, "status": eval_status})
     payment_response_hash = _hash({
-        "signature": observation.get("signature", UNOBSERVED),
-        "instructionIndex": observation.get("instructionIndex", UNOBSERVED),
-        "amount": observation.get("amountBaseUnits", UNOBSERVED),
-        "mint": observation.get("mint", UNOBSERVED),
-        "payee": observation.get("destinationOwner", UNOBSERVED),
+        "signature": observation.get("signature"),
+        "instructionIndex": observation.get("instructionIndex"),
+        "amount": observation.get("amountBaseUnits"),
+        "mint": observation.get("mint"),
+        "payee": observation.get("destinationOwner"),
     })
-    settlement = _settlement_proof(expected, observation, amount)
-    settlement_signature = settlement["signature"]
+    settlement = _settlement_proof(observation)
+    settlement_signature = settlement.get("signature")
     quote = {
         "amount": expected["amountBaseUnits"],
         "asset": "AUDD",
@@ -776,9 +833,15 @@ def _build_receipt(
         "payment": {
             "network": "solana-devnet",
             "asset": "AUDD",
-            "amount": expected["amountBaseUnits"],
-            "paymentProofRef": f"fixture:spl-transfer-checked:{expected['signature']}:0",
-            "proofBoundary": "fixture proof metadata only; not a live AUDD payment",
+            "amount": observation.get("amountBaseUnits"),
+            "paymentProofRef": (
+                f"fixture:spl-transfer-checked:{observation['signature']}:{observation['instructionIndex']}"
+                if observation else None
+            ),
+            "proofBoundary": (
+                "fixture proof metadata only; not a live AUDD payment" if observation
+                else "no verified payment observation; this is an incomplete receipt candidate, not a receipt"
+            ),
         },
         "requestHash": request["requestHash"],
         "responseHash": response_hash,
@@ -845,7 +908,8 @@ def _build_receipt(
         "privacyAccounting": {
             "entryRef": "privacy://arena/preview/no-personal-data",
             "privacyClass": "public-fixture",
-            "joinRefs": [request_id, payment_response_hash, settlement_signature, response_hash, eval_report_hash],
+            "joinRefs": [ref for ref in (request_id, payment_response_hash, settlement_signature,
+                                         response_hash, eval_report_hash) if ref],
             "retentionPolicy": "fixture only; no player-identifiable metadata",
         },
         "disputeState": {"status": "none"},
@@ -886,19 +950,40 @@ def _validate_receipt_layers(receipt: dict) -> list[dict]:
     return diagnostics
 
 
+def _valid_request(receipt: dict) -> dict:
+    request = _as_dict(receipt.get("request"))
+    if _missing(request, ("requestId", "requestHash", "purpose", "toolName", "resourceScope")):
+        return {}
+    return request
+
+
+def _valid_layer(receipt: dict, layer: str) -> dict:
+    """The layer when present and complete, else empty.
+
+    Mirrors the canonical validator: a semantic cross-check must never consume
+    an incomplete evidence layer, because the structural pass already rejected
+    it with `rap_receipt.<category>.invalid`. Running anyway invents mismatches
+    against fields that were simply never observed.
+    """
+    value = _as_dict(receipt.get(layer))
+    if _missing(value, REQUIRED_LAYER_FIELDS[layer]):
+        return {}
+    return value
+
+
 def _validate_receipt_semantics(receipt: dict) -> list[dict]:
     diagnostics: list[dict] = []
-    request = _as_dict(receipt.get("request"))
-    authority = _as_dict(receipt.get("delegatedAuthority"))
-    resource = _as_dict(receipt.get("resourceAuthorization"))
-    payment = _as_dict(receipt.get("paymentEvidence"))
-    settlement = _as_dict(receipt.get("settlementProgramProof"))
-    service = _as_dict(receipt.get("serviceOutcome"))
-    eval_ev = _as_dict(receipt.get("evalEvidence"))
-    replay = _as_dict(receipt.get("replayIdempotency"))
-    accounting = _as_dict(receipt.get("privacyAccounting"))
-    dispute = _as_dict(receipt.get("disputeState"))
-    hold = _as_dict(receipt.get("rollbackHold"))
+    request = _valid_request(receipt)
+    authority = _valid_layer(receipt, "delegatedAuthority")
+    resource = _valid_layer(receipt, "resourceAuthorization")
+    payment = _valid_layer(receipt, "paymentEvidence")
+    settlement = _valid_layer(receipt, "settlementProgramProof")
+    service = _valid_layer(receipt, "serviceOutcome")
+    eval_ev = _valid_layer(receipt, "evalEvidence")
+    replay = _valid_layer(receipt, "replayIdempotency")
+    accounting = _valid_layer(receipt, "privacyAccounting")
+    dispute = _valid_layer(receipt, "disputeState")
+    hold = _valid_layer(receipt, "rollbackHold")
 
     if authority and request and authority.get("purpose") != request.get("purpose"):
         diagnostics.append(_diag("rap_receipt.authority.scope_mismatch", "Mandate purpose does not match request purpose.", "authority", "receipt.delegatedAuthority.purpose"))
@@ -979,7 +1064,8 @@ def validate_assurance(receipt: dict | None, trace: dict, payment_result: dict, 
     if not policy_allowed:
         diagnostics.append(_diag("rap_receipt.authority.scope_mismatch", "Delegated authority denied this resource; no payment/work receipt may be accepted.", "authority", "policyDecision"))
     if not payment_result.get("ok"):
-        diagnostics.append(_diag(f"rap_assurance.payment_observation.{payment_result.get('reason', 'missing')}", payment_result.get("message", "payment observation did not verify"), "payment", "paymentObservation"))
+        refusal = payment_result.get("arenaRefusal") or payment_result.get("reason") or "missing"
+        diagnostics.append(_diag(f"rap_assurance.payment_observation.{refusal}", payment_result.get("message", "payment observation did not verify"), "payment", "paymentObservation"))
     if receipt is None:
         diagnostics.append(_diag("rap_receipt.envelope.required", "No RAP receipt was emitted for this denied/no-payment path.", "envelope", "receipt"))
     else:
@@ -1020,13 +1106,22 @@ def _scenario_fixture(scenario: str) -> tuple[dict, dict | None]:
 def _payment_for_scenario(scenario: str) -> tuple[dict, dict | None]:
     fixture, replay_store = _scenario_fixture(scenario)
     if scenario == "authorization-denied":
-        return _payment_failure("authorization_denied", "policy denied before payment preparation; no payment observation exists"), None
+        return _no_payment_attempt("authorization_denied", "policy denied before payment preparation; no payment observation exists"), None
     if scenario == "duplicate-replay" and replay_store is not None:
         first = verify_spl_transfer_checked_fixture(fixture["parsedTransaction"], fixture["expected"], replay_store=replay_store)
         second = verify_spl_transfer_checked_fixture(fixture["parsedTransaction"], fixture["expected"], replay_store=replay_store)
         second["firstAttempt"] = first
         return second, replay_store
     return verify_spl_transfer_checked_fixture(fixture["parsedTransaction"], fixture["expected"]), replay_store
+
+
+def _receipt_artifact(receipt: dict | None, decision: str) -> dict:
+    """What the emitted JSON actually is, so no surface calls it a receipt early."""
+    if receipt is None:
+        return {"kind": "not-emitted", "label": "no receipt candidate (denied before payment)"}
+    if decision == "accept":
+        return {"kind": "receipt", "label": "RAP Assurance receipt"}
+    return {"kind": "invalid-candidate", "label": "invalid RAP Assurance receipt candidate"}
 
 
 def _tamper_trace(trace: dict) -> dict:
@@ -1120,6 +1215,7 @@ def build_assurance_preview(
             "paymentObservation": {
                 "fixtureId": fixture["fixtureId"],
                 "boundary": fixture["boundary"],
+                "arenaPreviewLabels": preview_labels(),
                 "result": payment_result,
             },
             "receiptIntegrity": {
@@ -1129,6 +1225,7 @@ def build_assurance_preview(
         },
         "trace": presented_trace,
         "receipt": receipt,
+        "receiptArtifact": _receipt_artifact(receipt, assurance["decision"]),
         "settlement": settlement,
         "assertions": [
             {

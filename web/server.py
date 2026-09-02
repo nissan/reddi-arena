@@ -544,6 +544,10 @@ class Handler(BaseHTTPRequestHandler):
                 bundle = assurance.build_assurance_preview(
                     a, b, scenario=scenario, seed=seed, hire_a=ha, hire_b=hb,
                     entered_a=ca, entered_b=cb)
+            except assurance.AssuranceIntegrityError as exc:
+                print(f"[assurance] preview integrity failure: {exc}", flush=True)
+                return self._send(
+                    {"error": "Devnet Preview is unavailable: server-side fixture integrity check failed"}, 500)
             except ValueError as exc:
                 return self._send({"error": str(exc)}, 400)
             return self._send(bundle)

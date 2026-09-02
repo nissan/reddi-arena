@@ -447,6 +447,7 @@ function renderAssurance(b){
   const diags=(r.diagnostics||[]).map(d=>`<div class="mini"><b>${esc(d.code)}</b><br>${esc(d.message)}<br><span class="note">${esc(d.path)}</span></div>`).join('') || '<div class="mini"><b>No diagnostics.</b><br>All required fixture layers accepted.</div>';
   const asserts=(b.assertions||[]).map(a=>`<div class="card"><h3>${esc(a.label)}</h3>${statusPill('status',a.status)}<p class="mini">${esc(a.text)}</p><div class="note">${esc(a.boundary)}</div></div>`).join('');
   const first=p.firstAttempt?`<div class="note">First replay-store attempt: ${p.firstAttempt.ok?'accepted':'rejected'}; second attempt: ${esc(p.reason)}</div>`:'';
+  const artifact=b.receiptArtifact||{kind:'receipt',label:'RAP Assurance receipt'};
   $('#assuranceOut').innerHTML=`
     <div class="card" style="margin-bottom:14px"><span class="chip amber">${esc(b.label)}</span>
       <h3>${esc(b.scenario.title)}</h3>
@@ -459,11 +460,11 @@ function renderAssurance(b){
       <div class="card"><h3>Replayable work trace</h3><div class="console">${turns}</div>
         <div class="note">trace ${esc((b.trace.traceHash||'').slice(0,32))}… · no live model calls</div></div>
       <div class="card"><h3>Payment fixture</h3>
-        <div class="mini"><b>${esc(b.adapters.paymentObservation.fixtureId)}</b><br>${esc(p.ok?'exact TransferChecked fixture accepted':p.reason||'not observed')}</div>
+        <div class="mini"><b>${esc(b.adapters.paymentObservation.fixtureId)}</b><br>${esc(p.ok?'exact TransferChecked fixture accepted':p.arenaRefusal||p.reason||'not observed')}</div>
         ${first}<div class="note">${esc(b.adapters.paymentObservation.boundary)}</div></div>
       <div class="card"><h3>RAP receipt diagnostics</h3>${diags}</div>
     </div>
-    <details class="receipt-json"><summary>Inspect RAP Assurance receipt JSON</summary><pre>${esc(JSON.stringify(b.receipt||{receipt:'not emitted for this denied path'},null,2))}</pre></details>
+    <details class="receipt-json"><summary>Inspect ${esc(artifact.label)} JSON</summary><pre>${esc(JSON.stringify(b.receipt||{receipt:'not emitted for this denied path'},null,2))}</pre></details>
     <div class="coach"><b>Contribute verification fixtures</b>Add deterministic parsed-payment or receipt fixtures under <code>${esc(b.contribution.fixtures)}</code>, document the simulated/read-only/blocked boundary, and prove it through <code>${esc(b.contribution.tests)}</code>. Canonical RAP/ADL semantics stay upstream; Arena only adapts to them.</div>`;
 }
 

@@ -34,8 +34,19 @@ The payment fixture uses the canonical `AUDD_DETERMINISTIC_FIXTURE_MINT`
 sentinel (`AUDDdev111111111111111111111111111111111111`) on the
 `deterministic-fixture` rail, which is `non_eligible` for grant volume. The
 official AUDD mainnet mint is never a fixture value: `load_payment_fixture()`
-and the fixture verifier both refuse it. `policyDecision.reasonCodes` only ever
-carry codes from the closed canonical `ReddiPolicyReasonCode` set.
+refuses a fixture carrying it, and the verifier refuses it on both the expected
+terms and the parsed transaction without echoing the mint back.
+
+Canonical documents keep their exact canonical shape. The observation's
+`evidence` object carries only `source` and `grantEligible`;
+`policyDecision.reasonCodes` only carry codes from the closed
+`ReddiPolicyReasonCode` set; and observation failures only carry codes from the
+closed `SplTransferCheckedObservationFailureReason` union. Arena-only
+disclosure lives outside those documents in
+`adapters.paymentObservation.arenaPreviewLabels`
+(`reddi.arena.devnet-preview-labels.v1`), and an Arena-specific refusal such as
+the official-mint prohibition travels in `arenaRefusal` alongside the closest
+truthful canonical `reason`.
 
 If those upstream interfaces change, Arena should update this adapter or file a
 finding upstream. It should not silently invent a competing receipt contract.
@@ -54,11 +65,15 @@ The preview catalog is returned by `GET /api/assurance/scenarios`.
 | `refund-gate-failed` | rejected for reputation/payout; projected settlement refund |
 | `authorization-denied` | blocked before payment; no receipt is emitted |
 
-When the payment observation does not verify, the receipt's
-`settlementProgramProof` reports `unobserved` fields and an `unverified`
-confirmation rather than restating the expected transfer, so the canonical
-`rap_receipt.settlement.unconfirmed` / `.payee_mismatch` diagnostics fire on the
-receipt itself and not only on the payment adapter.
+When the payment observation does not verify, the emitted JSON is an **invalid
+receipt candidate**, not a receipt — `receiptArtifact.kind` says so and the UI
+labels it that way. Its `settlementProgramProof` omits every observable field
+and its `payment.paymentProofRef` / `payment.amount` are null rather than
+restating the expected transfer, so the canonical
+`rap_receipt.settlement.invalid` diagnostic reports incomplete settlement
+evidence. Semantic cross-checks never run on an incomplete layer, so the
+candidate is never accused of a mismatch against a field that was simply never
+observed.
 
 ## What is simulated, read-only, blocked, or approval-gated
 
