@@ -156,7 +156,9 @@ def main() -> None:
     # deliberately NOT rewritten when the authority file moves, so this snapshot
     # stays trustworthy as evidence; planning/graph.yaml also carries recorded
     # evidence and done statuses this generator does not emit, which is why
-    # rerunning it is an archival re-derivation, not a maintenance step.
+    # rerunning it is an archival re-derivation, not a maintenance step. Both
+    # halves are enforced by the "planning-graph re-derivation" checks in
+    # tests/test_arena.py.
     nodes.extend([
         {
             "id": "GE01",

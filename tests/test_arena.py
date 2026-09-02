@@ -784,6 +784,83 @@ _gp_changed3, _gp_already3 = _gp.migrate_guidance_pointer(
 check("every checked-in generated artifact already points at AGENTS.md",
       not _gp_changed3 and len(_gp_already3) == len(_gp_names))
 
+print("planning-graph re-derivation preserves completed-node history")
+# planning/graph.yaml was SEEDED by tools/plan_to_graph.py (GE01) and is
+# hand-maintained after that: done statuses and evidence.recorded are the node
+# evidence AGENTS.md requires, and the generator emits neither for a node the
+# backlog does not already mark done. So re-running the generator is an ARCHIVAL
+# re-derivation, never a maintenance step, and the right regression asserts
+# non-rewrite of the hand-maintained fields — not byte-equality of a regenerated
+# file, which would enshrine exactly the loss described below.
+import subprocess as _sp_pg
+import tempfile as _tempfile_pg
+from pathlib import Path as _Path_pg
+import yaml as _yaml_pg
+import plan_to_graph as _p2g
+
+# The generator writes to one fixed path; redirect it so this regression can
+# never mutate the checked-in graph (ROOT rides along only for its log line).
+_pg_path = ROOT / "planning" / "graph.yaml"
+_pg_before = _pg_path.read_text()
+_pg_dir = _Path_pg(_tempfile_pg.mkdtemp(prefix="arena-graph-rederive-"))
+_pg_out = _pg_dir / "graph.yaml"
+
+
+def _rederive_graph():
+    _saved = (_p2g.OUT, _p2g.ROOT)
+    _p2g.OUT, _p2g.ROOT = _pg_out, _pg_dir
+    try:
+        _p2g.main()
+    finally:
+        _p2g.OUT, _p2g.ROOT = _saved
+    return _pg_out.read_text()
+
+
+_pg_fresh_text = _rederive_graph()
+check("re-deriving the graph never writes planning/graph.yaml",
+      _pg_path.read_text() == _pg_before and _pg_out.is_file())
+_pg_live = {n["id"]: n for n in _yaml_pg.safe_load(_pg_before)["nodes"]}
+_pg_fresh = {n["id"]: n for n in _yaml_pg.safe_load(_pg_fresh_text)["nodes"]}
+check("the re-derivation still covers exactly the checked-in node set",
+      set(_pg_fresh) == set(_pg_live) and len(_pg_live) == 42)
+
+# Why byte-equality is the wrong gate: most completed nodes were marked done in
+# the graph after migration, so a full regeneration demotes them and discards the
+# merged-PR evidence recorded by hand.
+_pg_hand_done = [i for i, n in _pg_live.items()
+                 if n["status"] == "done" and n["evidence"].get("recorded")]
+_pg_dropped = [i for i in _pg_hand_done
+               if _pg_fresh[i]["status"] != "done"
+               or not _pg_fresh[i]["evidence"].get("recorded")]
+check("a full regeneration would drop recorded evidence (archival re-derivation only)",
+      set(_pg_dropped) >= {"GE01", "GE02", "GE03"})
+check("the checked-in graph keeps every completed node's status and evidence",
+      len(_pg_hand_done) >= 21
+      and all(_pg_live[i]["evidence"]["recorded"] for i in _pg_hand_done))
+
+# The authority file moved (CLAUDE.md is now a one-line import of AGENTS.md), but
+# GE01 is a completed node: its text records the workflow as it was executed, so
+# neither the graph nor the generator may be rewritten to today's pointer.
+_pg_ge01 = _pg_live["GE01"]
+_pg_hist = "\n".join([_pg_ge01["objective"], *_pg_ge01["acceptance"],
+                       *_pg_ge01["surfaces"]["allow"]])
+check("the completed GE01 node still records the authority file it ran against",
+      "CLAUDE.md" in _pg_hist and "AGENTS.md" not in _pg_hist)
+check("re-derivation reproduces GE01's historical text verbatim (no authority rewrite)",
+      all(_pg_fresh["GE01"][f] == _pg_ge01[f]
+          for f in ("title", "objective", "acceptance", "boundary", "surfaces")))
+check("today's authority is AGENTS.md, reached from CLAUDE.md by import",
+      (ROOT / "CLAUDE.md").read_text().strip().endswith("@AGENTS.md")
+      and (ROOT / "AGENTS.md").is_file())
+
+check("re-derivation is deterministic (a second run is byte-identical)",
+      _rederive_graph() == _pg_fresh_text)
+check("the checked-in graph and its re-derivation both lint clean (G1-G7)",
+      all(_sp_pg.run([sys.executable, str(ROOT / "tools" / "graph_lint.py"), str(_p)],
+                     capture_output=True).returncode == 0
+          for _p in (_pg_path, _pg_out)))
+_shutil_gp.rmtree(_pg_dir)
+
 print("provider abstraction (B3: T-026 T-027 T-028)")
 import yaml as _yaml_b3
 from core.providers import (
@@ -1445,7 +1522,7 @@ check("T-009 defender weighs exactly 62 AU", weigh(DEF)["soloAU"] == 62)
 check("T-009 mercenary weighs exactly 91 AU", weigh(MERC)["soloAU"] == 91)
 
 # The formula is frozen: the spec document must say so, and changes must go
-# through a v0.2 formula spec, never a mid-season edit (CLAUDE.md boundary).
+# through a v0.2 formula spec, never a mid-season edit (AGENTS.md boundary).
 _spec = (ROOT / "docs" / "WEIGHT-CLASS-v0.1.md").read_text()
 check("frozen spec: status is frozen, not draft",
       "**Status:** frozen" in _spec and "draft" not in _spec.split("\n")[2])
