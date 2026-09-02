@@ -101,13 +101,16 @@ its real first observation, so it keeps its evidence — the artifact is an
 `invalid-candidate`. Every evidence field that would have to be *observed* is
 withheld rather than restated from the expected terms: `settlementProgramProof`
 omits each observable field, and `paymentEvidence.payee` / `.amount` /
-`.responseHash`, `payment.paymentProofRef` / `payment.amount` and
-`replayIdempotency.idempotencyKey` are null. `paymentEvidence.responseHash`
-identifies an observed payment *response*, so it is computed only from a
-structurally complete canonical observation — hashing the absent fields would
-mint a fixed, well-formed digest that reads as evidence — and an absent hash
-contributes no `privacyAccounting.joinRefs` entry and no
-`replayIdempotency.priorPaymentResponseHashes` entry either. The canonical
+`.payloadHash` / `.responseHash`, `payment.paymentProofRef` / `payment.amount`
+and `replayIdempotency.idempotencyKey` are null. `paymentEvidence.payloadHash`
+and `.responseHash` identify an observed payment *payload* and *response*, so
+both are computed only from a structurally complete canonical observation —
+hashing the absent fields, or a fixed `not-observed` marker, would mint a
+well-formed digest that reads as evidence — and an absent hash contributes no
+`privacyAccounting.joinRefs` entry and no
+`replayIdempotency.priorPaymentResponseHashes` entry either. That a payment was
+not observed is carried by the canonical diagnostics and by
+`payment.proofBoundary`, never by a synthetic digest. The canonical
 `rap_receipt.payment.invalid`, `.settlement.invalid` and `.replay.invalid`
 diagnostics then report incomplete evidence, and that same structural pass is
 what classifies the artifact. Semantic cross-checks never run on an incomplete

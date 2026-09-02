@@ -2183,6 +2183,7 @@ check("an accepted scenario is labelled a receipt and a denied one is not emitte
 # responseHash join reference.
 _PLACEHOLDER_RESPONSE_HASH = assurance._hash(
     {"signature": None, "instructionIndex": None, "amount": None, "mint": None, "payee": None})
+_PLACEHOLDER_PAYLOAD_HASH = assurance._hash({"payment": "not-observed"})
 _observed_scenarios = ("valid-receipt", "refund-gate-failed", "duplicate-replay",
                        "tampered-trace")
 _unobserved_scenarios = ("wrong-mint", "wrong-payee")
@@ -2196,6 +2197,9 @@ for _case in _observed_scenarios:
           and _hash_ok is not None
           and _hash_ok != _PLACEHOLDER_RESPONSE_HASH
           and _hash_ok in _b["receipt"]["privacyAccounting"]["joinRefs"])
+    check(f"{_case} hashes the payment payload it actually observed",
+          _b["receipt"]["paymentEvidence"]["payloadHash"] == assurance._hash(_obs)
+          and _b["receipt"]["paymentEvidence"]["payloadHash"] != _PLACEHOLDER_PAYLOAD_HASH)
 for _case in _unobserved_scenarios:
     _b = assurance.build_assurance_preview(DEF, RAID, scenario=_case, seed=2)
     _refs = _b["receipt"]["privacyAccounting"]["joinRefs"]
@@ -2205,6 +2209,12 @@ for _case in _unobserved_scenarios:
           and len(_refs) == len(set(_refs))
           and "rap_receipt.payment.invalid"
           in {d["code"] for d in _b["adapters"]["receiptIntegrity"]["result"]["diagnostics"]})
+    check(f"{_case} withholds payloadHash rather than emitting a not-observed marker digest",
+          _b["receipt"]["paymentEvidence"]["payloadHash"] is None
+          and _PLACEHOLDER_PAYLOAD_HASH not in _refs
+          and _PLACEHOLDER_PAYLOAD_HASH not in _json_ass.dumps(_b["receipt"])
+          and "no verified payment observation"
+          in _b["receipt"]["payment"]["proofBoundary"])
 check("a replay ledger never lists a fabricated prior payment response hash",
       _PLACEHOLDER_RESPONSE_HASH not in assurance.build_assurance_preview(
           DEF, RAID, scenario="duplicate-replay", seed=2)["receipt"]
@@ -2213,6 +2223,14 @@ check("a replay ledger never lists a fabricated prior payment response hash",
 # or null-valued observation is still an unobserved response.
 _complete_obs = assurance._observed_result(
     _valid["adapters"]["paymentObservation"]["result"])["observation"]
+check("a partial observation earns neither evidence identifier",
+      all(assurance._payment_payload_hash(_o) is None
+          and assurance._payment_response_hash(_o) is None
+          for _o in ({}, {"payment": "not-observed"},
+                     {**_complete_obs, "signature": None},
+                     {**_complete_obs, "amountBaseUnits": ""},
+                     {k: v for k, v in _complete_obs.items() if k != "mint"}))
+      and assurance._payment_payload_hash(_complete_obs) == assurance._hash(_complete_obs))
 check("a complete canonical observation is the only thing that earns a response hash",
       assurance._payment_response_hash(_complete_obs) is not None
       and assurance._payment_response_hash({}) is None
@@ -2244,7 +2262,10 @@ for _case in _observed_scenarios + _unobserved_scenarios:
           == _b["receipt"]["paymentEvidence"]["responseHash"]
           and (isinstance(_round["paymentEvidence"]["responseHash"], str)
                if _observed_case else _round["paymentEvidence"]["responseHash"] is None)
-          and _PLACEHOLDER_RESPONSE_HASH not in _json_ass.dumps(_round))
+          and (isinstance(_round["paymentEvidence"]["payloadHash"], str)
+               if _observed_case else _round["paymentEvidence"]["payloadHash"] is None)
+          and _PLACEHOLDER_RESPONSE_HASH not in _json_ass.dumps(_round)
+          and _PLACEHOLDER_PAYLOAD_HASH not in _json_ass.dumps(_round))
 
 # A semantic refusal (failed eval, replay, tampered trace) leaves a genuinely
 # observed, canonically complete receipt. Calling that an invalid candidate
@@ -2468,11 +2489,24 @@ def _req(method, path, body=None, token=None):
         return e.code, _wjson.loads(e.read())
 
 
-# The preview endpoint carries its own per-client limit; this block exercises
-# far more scenarios than an operator ever would in one window, so it runs with
-# the limit lifted. The limit itself is proved in its own section below.
+# The preview endpoint carries its own per-client limit. The integration blocks
+# below exercise far more scenarios against one client key than an operator ever
+# would in a single window, so every enabled server they touch runs under an
+# explicit test-only allowance. The shipped default is restored and proved in
+# its own isolated section further down.
 _ASSURANCE_RATE_DEFAULT = _srv.ASSURANCE_RATE_MAX
-_srv.ASSURANCE_RATE_MAX = 10_000
+_ASSURANCE_RATE_TEST_ALLOWANCE = 10_000
+_assurance_rate_lifted = []
+
+
+def _lift_assurance_rate_limit(mod):
+    """Give one server module the test-only preview allowance."""
+    mod.ASSURANCE_RATE_MAX = _ASSURANCE_RATE_TEST_ALLOWANCE
+    _assurance_rate_lifted.append(mod)
+    return mod
+
+
+_lift_assurance_rate_limit(_srv)
 
 _s, _b = _req("GET", "/api/assurance/scenarios")
 check("assurance API publishes the deterministic scenario catalog",
@@ -2649,11 +2683,13 @@ def _serve(mod):
     return _h.server_address[1]
 
 
-def _call(port, method, path, raw=None):
+def _call(port, method, path, raw=None, xff=None):
     """Raw request against a given server: returns (status, body bytes)."""
     r = _urequest.Request(f"http://127.0.0.1:{port}{path}", method=method, data=raw)
     if raw is not None:
         r.add_header("Content-Type", "application/json")
+    if xff is not None:
+        r.add_header("X-Forwarded-For", xff)
     try:
         resp = _urequest.urlopen(r, timeout=10)
         return resp.status, resp.read()
@@ -2683,7 +2719,7 @@ for _label, _flag_v, _ctx_v in (("ctx-missing", "true", None),
 
 # The two exposing environments differ only in the truth they may assert about
 # where they are running. Every other disclosure survives enablement.
-_srv_hosted = _load_server("true", "hosted", "ctx-hosted")
+_srv_hosted = _lift_assurance_rate_limit(_load_server("true", "hosted", "ctx-hosted"))
 _port_hosted = _serve(_srv_hosted)
 for _mod, _port, _name, _external in ((_srv, _port, "local", False),
                                       (_srv_hosted, _port_hosted, "hosted", True)):
@@ -2908,7 +2944,8 @@ print("Devnet Preview rate limit")
 # DDoS protection. A malformed body is the cheap probe: it never reaches
 # fixture or match work, so a 400 proves the limiter admitted the call and a
 # 429 proves it refused before the body was even parsed.
-_srv.ASSURANCE_RATE_MAX = _ASSURANCE_RATE_DEFAULT
+for _rl_lifted in _assurance_rate_lifted:
+    _rl_lifted.ASSURANCE_RATE_MAX = _ASSURANCE_RATE_DEFAULT
 _rl_mods = {}
 for _ctx in ("local", "hosted"):
     _rl_m = _load_server("true", _ctx, "rate-limit-" + _ctx)
@@ -2917,8 +2954,8 @@ for _ctx in ("local", "hosted"):
     _rl_n = _rl_m.ASSURANCE_RATE_MAX
     _rl_codes = [_call(_rl_p, "POST", "/api/assurance", b"{not json")[0]
                  for _ in range(_rl_n + 1)]
-    check(f"the shipped preview limit bounds an enabled {_ctx} instance per client",
-          _rl_m.ASSURANCE_PREVIEW_ENABLED and 2 <= _rl_n <= 60
+    check(f"the shipped preview limit admits exactly 20 {_ctx} requests, then 429s",
+          _rl_m.ASSURANCE_PREVIEW_ENABLED and _rl_n == 20
           and _rl_codes[:-1] == [400] * _rl_n and _rl_codes[-1] == 429)
 _rl_mod, _rl_port = _rl_mods["local"]
 _rl_limit = _rl_mod.ASSURANCE_RATE_MAX
@@ -2954,6 +2991,16 @@ _s_rl_f, _b_rl_f = _call(_rl_port, "POST", "/api/fight", _preview_body)
 check("exhausting the preview bucket leaves the match endpoint's own bucket intact",
       _call(_rl_port, "POST", "/api/assurance", _preview_body)[0] == 429
       and _s_rl_f == 200 and "winner" in _wjson.loads(_b_rl_f))
+# Buckets are per client too: one exhausted forwarded client must not spend
+# another client's preview budget.
+_rl_ind_mod = _load_server("true", "local", "rate-limit-clients")
+_rl_ind_port = _serve(_rl_ind_mod)
+_rl_ind_codes = [_call(_rl_ind_port, "POST", "/api/assurance", b"{not json", xff="9.9.9.9")[0]
+                 for _ in range(_rl_ind_mod.ASSURANCE_RATE_MAX + 1)]
+check("exhausting one forwarded client's preview budget leaves other clients served",
+      _rl_ind_codes[-1] == 429
+      and _call(_rl_ind_port, "POST", "/api/assurance", b"{not json", xff="8.8.8.8")[0] == 400
+      and _call(_rl_ind_port, "POST", "/api/assurance", b"{not json")[0] == 400)
 # The disabled route is decided before the limiter, so a flood against a
 # default-off deploy stays indistinguishable from an unknown path and never
 # allocates a bucket for it.

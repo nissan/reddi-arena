@@ -985,32 +985,47 @@ def _observed_result(payment_result: dict) -> dict:
     return first if first.get("ok") else {}
 
 
+def _complete_observation(observation: dict) -> dict:
+    """The observation when it is a structurally complete canonical record, else empty.
+
+    Every evidence identifier in `paymentEvidence` describes a payment someone
+    actually observed. Deriving one from an unobserved or half-filled record —
+    hashing a dict of `None`s, or a fixed "not-observed" marker — mints a
+    well-formed `sha256:` digest that reads as evidence, so this is the one
+    gate every such identifier passes through.
+    """
+    if not observation or observation.get("schemaVersion") != SPL_OBSERVATION_SCHEMA_VERSION:
+        return {}
+    amount = _string(observation.get("amountBaseUnits"))
+    if amount is None or not amount.isdigit():
+        return {}
+    if any(_string(observation.get(field)) is None for field in
+           ("instructionIndex", "signature", "mint", "destinationOwner")):
+        return {}
+    return observation
+
+
+def _payment_payload_hash(observation: dict) -> str | None:
+    """The digest of an observed payment payload, or None when none exists."""
+    observed = _complete_observation(observation)
+    return _hash(observed) if observed else None
+
+
 def _payment_response_hash(observation: dict) -> str | None:
     """The digest of an observed payment response, or None when none exists.
 
-    Hashing a dict of `None`s yields a fixed, well-formed `sha256:` digest that
-    reads as evidence of a response nobody observed, so the hash is computed
-    only from a structurally complete canonical observation. An unobserved or
-    incomplete candidate carries no responseHash, and therefore contributes no
-    privacy join reference either.
+    An unobserved or incomplete candidate carries no responseHash, and
+    therefore contributes no privacy join reference either.
     """
-    if not observation or observation.get("schemaVersion") != SPL_OBSERVATION_SCHEMA_VERSION:
-        return None
-    amount = _string(observation.get("amountBaseUnits"))
-    if amount is None or not amount.isdigit():
-        return None
-    index = _string(observation.get("instructionIndex"))
-    signature = _string(observation.get("signature"))
-    mint = _string(observation.get("mint"))
-    payee = _string(observation.get("destinationOwner"))
-    if index is None or signature is None or mint is None or payee is None:
+    observed = _complete_observation(observation)
+    if not observed:
         return None
     return _hash({
-        "signature": signature,
-        "instructionIndex": index,
-        "amount": amount,
-        "mint": mint,
-        "payee": payee,
+        "signature": observed["signature"],
+        "instructionIndex": observed["instructionIndex"],
+        "amount": observed["amountBaseUnits"],
+        "mint": observed["mint"],
+        "payee": observed["destinationOwner"],
     })
 
 
@@ -1145,7 +1160,7 @@ def _build_receipt(
         },
         "paymentEvidence": {
             "requiredHash": _hash(expected),
-            "payloadHash": _hash(observation or {"payment": "not-observed"}),
+            "payloadHash": _payment_payload_hash(observation),
             "responseHash": payment_response_hash,
             "rail": rail,
             "facilitatorRef": "fixture:x402-solana-read-only-observer",
