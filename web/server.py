@@ -100,7 +100,6 @@ def preview_exposure(flag_value, context_value):
     return True, context == "hosted"
 
 
-ASSURANCE_DEPLOYMENT_CONTEXT = deployment_context(os.environ.get(ASSURANCE_CONTEXT_VAR))
 ASSURANCE_PREVIEW_ENABLED, ASSURANCE_EXTERNAL_DEPLOYMENT = preview_exposure(
     os.environ.get(ASSURANCE_PREVIEW_FLAG), os.environ.get(ASSURANCE_CONTEXT_VAR))
 
@@ -517,7 +516,7 @@ class Handler(BaseHTTPRequestHandler):
     def _seed(self, req, default):
         try:
             return int(req.get("seed", default))
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             return default
 
     def do_POST(self):

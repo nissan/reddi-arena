@@ -2439,11 +2439,22 @@ for _mod, _port, _name, _external in ((_srv, _port, "local", False),
           and _bun["boundary"]["previewOnly"] is True
           and _bun["boundary"]["cluster"] == "solana-devnet"
           and "Devnet Preview" in _bun["label"])
-# Nothing in this repo declares a hosted context: enabling the preview on a
-# hosted service is a separate operator action, so the default remains "off".
-check("no repo-shipped configuration declares the hosted context",
-      _srv.deployment_context(None) == "off"
-      and _load_server(None, None, "ctx-default").ASSURANCE_DEPLOYMENT_CONTEXT == "off")
+# A seed that cannot become an int — including a JSON float that overflows to
+# infinity — falls back to the default seed. It must never escape as an
+# unhandled OverflowError that drops the socket with no response at all.
+for _seed_raw in (b"1e400", b"-1e400", b"NaN", b'"twelve"', b"null", b"{}"):
+    _s_sd, _b_sd = _call(_port, "POST", "/api/assurance",
+                         b'{"botA":"antweight-vault-defender.adl.yaml",'
+                         b'"botB":"antweight-vault-raider.adl.yaml","seed":'
+                         + _seed_raw + b"}")
+    _s_sc, _b_sc = _call(_port, "POST", "/api/chain",
+                         b'{"botA":"antweight-vault-defender.adl.yaml",'
+                         b'"botB":"antweight-vault-raider.adl.yaml","seed":'
+                         + _seed_raw + b"}")
+    check(f"an unusable seed {_seed_raw!r} falls back to the default, never a dropped connection",
+          _s_sd == 200 and _s_sc == 200
+          and _wjson.loads(_b_sd)["trace"]["seed"] == 2
+          and "error" not in _wjson.loads(_b_sc))
 # A top-level array, scalar, string or null is caller error on every POST route:
 # one stable 400 before any field is read, never a dropped connection.
 for _path in ("/api/assurance", "/api/fight", "/api/draft", "/api/waitlist",
@@ -2570,23 +2581,50 @@ def _ignored(patterns, path):
     return _excluded
 
 
+def _copy_sources(arg):
+    """Every source of one COPY: all operands but the destination, flags dropped."""
+    return [_t for _t in arg.split() if not _t.startswith("--")][:-1]
+
+
 def _in_build_context(instructions, patterns, path):
     """True when `path` is copied into the image and not ignored out of it."""
     _copied = any(path == _src or path.startswith(_src.rstrip("/") + "/")
                   for _instr, _arg in instructions if _instr == "COPY"
-                  for _src in _arg.split()[:1])
+                  for _src in _copy_sources(_arg))
     return _copied and not _ignored(patterns, path)
+
+
+def _env_assignments(instructions):
+    """ENV/ARG instructions as the name -> value mapping they bake into the image."""
+    _vars = {}
+    for _instr, _arg in instructions:
+        if _instr not in ("ENV", "ARG") or not _arg:
+            continue
+        if "=" in _arg:
+            for _tok in _arg.split():
+                _k, _, _v = _tok.partition("=")
+                _vars[_k] = _v.strip('"\'')
+        else:
+            _k, _, _v = _arg.partition(" ")
+            _vars[_k] = _v.strip().strip('"\'')
+    return _vars
 
 
 _instructions = _dockerfile_instructions((ROOT / "Dockerfile").read_text())
 _ignore_patterns = (ROOT / ".dockerignore").read_text().splitlines()
-_baked_env = {_arg.replace("=", " ").split()[0]
-              for _instr, _arg in _instructions if _instr in ("ENV", "ARG") and _arg}
-check("an ordinary Railway redeploy configures neither gate variable",
-      _srv.ASSURANCE_PREVIEW_FLAG not in _railway_vars
-      and _srv.ASSURANCE_CONTEXT_VAR not in _railway_vars
-      and _srv.ASSURANCE_PREVIEW_FLAG not in _baked_env
-      and _srv.ASSURANCE_CONTEXT_VAR not in _baked_env)
+# The environment an ordinary redeploy of this tree hands the process: every
+# variable the image bakes in plus every variable the service definition sets.
+# Feeding it through the real gate is the evidence that nothing shipped here
+# enables the preview or declares the approval-gated hosted context.
+_shipped_env = dict(_railway_vars)
+_shipped_env.update(_env_assignments(_instructions))
+check("an ordinary Railway redeploy ships neither gate variable, so no hosted declaration exists",
+      _srv.ASSURANCE_PREVIEW_FLAG not in _shipped_env
+      and _srv.ASSURANCE_CONTEXT_VAR not in _shipped_env
+      and "hosted" not in _shipped_env.values())
+check("the environment an ordinary redeploy ships does not expose the preview",
+      _srv.preview_exposure(_shipped_env.get(_srv.ASSURANCE_PREVIEW_FLAG),
+                            _shipped_env.get(_srv.ASSURANCE_CONTEXT_VAR)) == (False, None))
 _fixture_rel = str(assurance.FIXTURE_PATH.relative_to(ROOT))
 check("the image build context includes the assurance fixtures the preview needs",
       assurance.FIXTURE_PATH.exists()

@@ -332,10 +332,10 @@ async function boot(){
   const hs=$('#hireA');hs.appendChild(none);
   MERCS.forEach(m=>{const o=document.createElement('option');o.value=m.id;
     o.textContent=`${m.name} · +${m.grants.defenseBonus||0} def · ${m.price.amount} cr`;hs.appendChild(o);});
-  /* devnet-preview:begin */
-  await bootAssurance();
-  /* devnet-preview:end */
   renderMarket(); loadBoard();
+  /* devnet-preview:begin */
+  try{await bootAssurance();}catch(e){console.error('Devnet Preview unavailable',e);}
+  /* devnet-preview:end */
   ['#botA','#hireA'].forEach(s=>$(s).addEventListener('change',updateScale));
   updateScale();
 }
