@@ -100,9 +100,14 @@ When no verified observation exists at all — a replay rejection still carries
 its real first observation, so it keeps its evidence — the artifact is an
 `invalid-candidate`. Every evidence field that would have to be *observed* is
 withheld rather than restated from the expected terms: `settlementProgramProof`
-omits each observable field, and `paymentEvidence.payee` / `.amount`,
-`payment.paymentProofRef` / `payment.amount` and
-`replayIdempotency.idempotencyKey` are null. The canonical
+omits each observable field, and `paymentEvidence.payee` / `.amount` /
+`.responseHash`, `payment.paymentProofRef` / `payment.amount` and
+`replayIdempotency.idempotencyKey` are null. `paymentEvidence.responseHash`
+identifies an observed payment *response*, so it is computed only from a
+structurally complete canonical observation — hashing the absent fields would
+mint a fixed, well-formed digest that reads as evidence — and an absent hash
+contributes no `privacyAccounting.joinRefs` entry and no
+`replayIdempotency.priorPaymentResponseHashes` entry either. The canonical
 `rap_receipt.payment.invalid`, `.settlement.invalid` and `.replay.invalid`
 diagnostics then report incomplete evidence, and that same structural pass is
 what classifies the artifact. Semantic cross-checks never run on an incomplete
@@ -203,6 +208,18 @@ separately approval-gated.
 Every other boundary in the table above still holds when the preview is on — it
 remains fixture-only, with no wallet, RPC, signing, submission, or custody path
 — so enabling it exposes the preview, never live value.
+
+With the preview on, `POST /api/assurance` is bounded per client by its own
+rate bucket (`ASSURANCE_RATE_MAX`, 20 requests per 60-second window — a
+deliberately conservative default, since the UI makes one call per operator
+action). It is the heaviest work on the unauthenticated surface, so the limit
+is checked immediately after the enablement gate and still before the request
+body is read: a refused caller buys no JSON parse, no fixture load, and no
+match run, and gets the same `429 {"error": "rate limited"}` contract as the
+other bounded routes. The bucket is separate from the signup and match buckets,
+and the shared hit map stays hard-capped. Like every limit here it keys on a
+spoofable forwarded-for value, so it is a courtesy bound, not DDoS protection;
+the hard bounds (body cap, key cap) do not depend on it.
 
 ## Contribution path
 

@@ -2176,6 +2176,76 @@ check("an accepted scenario is labelled a receipt and a denied one is not emitte
           DEF, RAID, scenario="authorization-denied", seed=2)["receiptArtifact"]["kind"]
       == "not-emitted")
 
+# paymentEvidence.responseHash identifies an OBSERVED payment response. Hashing
+# the absent fields of an unobserved candidate produces a fixed, well-formed
+# sha256 digest that reads as evidence, so the placeholder below must never
+# appear in any emitted artifact, and no unobserved candidate may contribute a
+# responseHash join reference.
+_PLACEHOLDER_RESPONSE_HASH = assurance._hash(
+    {"signature": None, "instructionIndex": None, "amount": None, "mint": None, "payee": None})
+_observed_scenarios = ("valid-receipt", "refund-gate-failed", "duplicate-replay",
+                       "tampered-trace")
+_unobserved_scenarios = ("wrong-mint", "wrong-payee")
+for _case in _observed_scenarios:
+    _b = assurance.build_assurance_preview(DEF, RAID, scenario=_case, seed=2)
+    _obs = assurance._observed_result(
+        _b["adapters"]["paymentObservation"]["result"])["observation"]
+    _hash_ok = assurance._payment_response_hash(_obs)
+    check(f"{_case} hashes the payment response it actually observed",
+          _b["receipt"]["paymentEvidence"]["responseHash"] == _hash_ok
+          and _hash_ok is not None
+          and _hash_ok != _PLACEHOLDER_RESPONSE_HASH
+          and _hash_ok in _b["receipt"]["privacyAccounting"]["joinRefs"])
+for _case in _unobserved_scenarios:
+    _b = assurance.build_assurance_preview(DEF, RAID, scenario=_case, seed=2)
+    _refs = _b["receipt"]["privacyAccounting"]["joinRefs"]
+    check(f"{_case} withholds responseHash entirely instead of hashing absent fields",
+          _b["receipt"]["paymentEvidence"]["responseHash"] is None
+          and _PLACEHOLDER_RESPONSE_HASH not in _refs
+          and len(_refs) == len(set(_refs))
+          and "rap_receipt.payment.invalid"
+          in {d["code"] for d in _b["adapters"]["receiptIntegrity"]["result"]["diagnostics"]})
+check("a replay ledger never lists a fabricated prior payment response hash",
+      _PLACEHOLDER_RESPONSE_HASH not in assurance.build_assurance_preview(
+          DEF, RAID, scenario="duplicate-replay", seed=2)["receipt"]
+      ["replayIdempotency"]["priorPaymentResponseHashes"])
+# Structural completeness, not mere presence, is what earns a hash: a partial
+# or null-valued observation is still an unobserved response.
+_complete_obs = assurance._observed_result(
+    _valid["adapters"]["paymentObservation"]["result"])["observation"]
+check("a complete canonical observation is the only thing that earns a response hash",
+      assurance._payment_response_hash(_complete_obs) is not None
+      and assurance._payment_response_hash({}) is None
+      and all(assurance._payment_response_hash({**_complete_obs, _f: None}) is None
+              for _f in ("signature", "instructionIndex", "amountBaseUnits",
+                         "mint", "destinationOwner", "schemaVersion"))
+      and all(assurance._payment_response_hash(
+                  {k: v for k, v in _complete_obs.items() if k != _f}) is None
+              for _f in ("signature", "instructionIndex", "amountBaseUnits",
+                         "mint", "destinationOwner"))
+      and assurance._payment_response_hash(
+          {**_complete_obs, "instructionIndex": 0}) is None
+      and assurance._payment_response_hash(
+          {**_complete_obs, "instructionIndex": ""}) is None
+      and assurance._payment_response_hash(
+          {**_complete_obs, "amountBaseUnits": "not-a-number"}) is None
+      and assurance._payment_response_hash(
+          {**_complete_obs, "amountBaseUnits": 2500000}) is None
+      and assurance._payment_response_hash(
+          {**_complete_obs, "schemaVersion": "some.other.v1"}) is None)
+# The receipt is emitted as JSON, so absence must survive serialization as an
+# explicit null rather than silently becoming a string.
+for _case in _observed_scenarios + _unobserved_scenarios:
+    _b = assurance.build_assurance_preview(DEF, RAID, scenario=_case, seed=2)
+    _round = _json_ass.loads(_json_ass.dumps(_b["receipt"]))
+    _observed_case = _case in _observed_scenarios
+    check(f"{_case} receipt JSON round-trips its responseHash truthfully",
+          _round["paymentEvidence"]["responseHash"]
+          == _b["receipt"]["paymentEvidence"]["responseHash"]
+          and (isinstance(_round["paymentEvidence"]["responseHash"], str)
+               if _observed_case else _round["paymentEvidence"]["responseHash"] is None)
+          and _PLACEHOLDER_RESPONSE_HASH not in _json_ass.dumps(_round))
+
 # A semantic refusal (failed eval, replay, tampered trace) leaves a genuinely
 # observed, canonically complete receipt. Calling that an invalid candidate
 # would erase the structural-vs-semantic distinction the preview teaches.
@@ -2397,6 +2467,12 @@ def _req(method, path, body=None, token=None):
     except _uerror.HTTPError as e:
         return e.code, _wjson.loads(e.read())
 
+
+# The preview endpoint carries its own per-client limit; this block exercises
+# far more scenarios than an operator ever would in one window, so it runs with
+# the limit lifted. The limit itself is proved in its own section below.
+_ASSURANCE_RATE_DEFAULT = _srv.ASSURANCE_RATE_MAX
+_srv.ASSURANCE_RATE_MAX = 10_000
 
 _s, _b = _req("GET", "/api/assurance/scenarios")
 check("assurance API publishes the deterministic scenario catalog",
@@ -2823,6 +2899,78 @@ check("the build-context model still excludes what the image drops",
       not any(_in_build_context(_instructions, _ignore_patterns, _p)
               for _p in ("tests/test_arena.py", "docs/OPERATIONS.md",
                          "core/waitlist.json", "fixtures/other/thing.json")))
+
+print("Devnet Preview rate limit")
+# /api/assurance runs the heaviest work on the unauthenticated surface (a vault
+# match, weigh-ins, a fixture load with full rail-identity validation, a receipt
+# build and two validation passes), so an enabled instance bounds it per client
+# in its own bucket. This is a courtesy limit on a spoofable client key, not
+# DDoS protection. A malformed body is the cheap probe: it never reaches
+# fixture or match work, so a 400 proves the limiter admitted the call and a
+# 429 proves it refused before the body was even parsed.
+_srv.ASSURANCE_RATE_MAX = _ASSURANCE_RATE_DEFAULT
+_rl_mods = {}
+for _ctx in ("local", "hosted"):
+    _rl_m = _load_server("true", _ctx, "rate-limit-" + _ctx)
+    _rl_p = _serve(_rl_m)
+    _rl_mods[_ctx] = (_rl_m, _rl_p)
+    _rl_n = _rl_m.ASSURANCE_RATE_MAX
+    _rl_codes = [_call(_rl_p, "POST", "/api/assurance", b"{not json")[0]
+                 for _ in range(_rl_n + 1)]
+    check(f"the shipped preview limit bounds an enabled {_ctx} instance per client",
+          _rl_m.ASSURANCE_PREVIEW_ENABLED and 2 <= _rl_n <= 60
+          and _rl_codes[:-1] == [400] * _rl_n and _rl_codes[-1] == 429)
+_rl_mod, _rl_port = _rl_mods["local"]
+_rl_limit = _rl_mod.ASSURANCE_RATE_MAX
+_s_rl, _b_rl = _call(_rl_port, "POST", "/api/assurance", _preview_body)
+check("an over-limit preview request gets the stable sanitized 429 contract",
+      _s_rl == 429 and _wjson.loads(_b_rl) == {"error": "rate limited"})
+# Nothing downstream of the limiter runs: a fixture that could only produce a
+# sanitized 500 still answers 429, and no match reaches the ledger.
+_real_rl = _rl_mod.assurance.FIXTURE_PATH
+try:
+    _rl_mod.assurance.FIXTURE_PATH = Path("/nonexistent/assurance-fixture.json")
+    _s_rl, _b_rl = _call(_rl_port, "POST", "/api/assurance", _preview_body)
+finally:
+    _rl_mod.assurance.FIXTURE_PATH = _real_rl
+check("a rejected preview request reads no fixture and runs no match",
+      _s_rl == 429 and _wjson.loads(_b_rl) == {"error": "rate limited"}
+      and not _rl_mod.LEDGER.exists())
+# It is a fixed window, not a permanent lockout: once the recorded hits fall
+# outside it the same client is served again.
+_rl_window = _rl_mod.SIGNUP_RATE_WINDOW
+try:
+    _rl_mod.SIGNUP_RATE_WINDOW = 0.0
+    _s_rl, _b_rl = _call(_rl_port, "POST", "/api/assurance", _preview_body)
+finally:
+    _rl_mod.SIGNUP_RATE_WINDOW = _rl_window
+check("the preview limit resets with its window instead of locking the client out",
+      _s_rl == 200 and _wjson.loads(_b_rl)["scenario"]["id"] == "valid-receipt")
+# Buckets are per endpoint: exhausting the preview must not lock a player out
+# of the match endpoint, which carries its own separate budget.
+for _ in range(_rl_limit + 1):
+    _call(_rl_port, "POST", "/api/assurance", b"{not json")
+_s_rl_f, _b_rl_f = _call(_rl_port, "POST", "/api/fight", _preview_body)
+check("exhausting the preview bucket leaves the match endpoint's own bucket intact",
+      _call(_rl_port, "POST", "/api/assurance", _preview_body)[0] == 429
+      and _s_rl_f == 200 and "winner" in _wjson.loads(_b_rl_f))
+# The disabled route is decided before the limiter, so a flood against a
+# default-off deploy stays indistinguishable from an unknown path and never
+# allocates a bucket for it.
+_rl_off_mod = _load_server(None, None, "rate-limit-off")
+_rl_off_port = _serve(_rl_off_mod)
+_rl_off_codes = {_call(_rl_off_port, "POST", "/api/assurance", _preview_body)[0]
+                 for _ in range(_rl_off_mod.ASSURANCE_RATE_MAX + 5)}
+check("a disabled preview route stays 404 under a flood and allocates no bucket",
+      _rl_off_codes == {404}
+      and not any(_k.startswith("assurance:") for _k in _rl_off_mod._SIGNUP_HITS))
+# The limiter map the preview shares is the same hard-capped LRU as every other
+# bucket, so a rotated client key cannot grow it without bound.
+_rl_mod.MAX_RATE_KEYS = 50
+for _k in range(500):
+    _rl_mod._rate_ok(f"assurance:rot-{_k}", limit=_rl_mod.ASSURANCE_RATE_MAX)
+check("the preview bucket cannot grow the rate-limit map past its hard cap",
+      len(_rl_mod._SIGNUP_HITS) <= 50)
 
 _s, _b = _req("POST", "/api/waitlist", {"email": "Player@Example.com", "roles": ["compete"]})
 check("waitlist signup works and normalizes case", _s == 200 and _b["ok"] and _b["position"] == 1)

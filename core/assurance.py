@@ -28,7 +28,6 @@ from core import chain
 from core.arena import (
     ARENA_CURRENCY,
     ARENA_RAIL,
-    _canon,
     _hash,
     run_vault_match,
     weigh_competitor,
@@ -477,16 +476,6 @@ def load_payment_fixture() -> dict:
     return fixture
 
 
-def _transfer_instruction_info(parsed: dict) -> dict:
-    for item in _collect_instructions(parsed):
-        if _is_transfer_checked(item["instruction"]):
-            info = _get_path(item["instruction"], "parsed", "info")
-            if isinstance(info, dict):
-                return info
-    raise AssuranceIntegrityError(
-        "preview fixture has no parsed TransferChecked instruction with an info object")
-
-
 def _destination_balance(parsed: dict, info: dict) -> dict:
     destination = _string(info.get("destination"))
     if destination is None:
@@ -555,10 +544,6 @@ def _sha256_text(text: str) -> str:
 
 def _trace_hash(trace: dict) -> str:
     return _hash({k: v for k, v in trace.items() if k != "traceHash"})
-
-
-def _digest_ref(prefix: str, obj: Any) -> str:
-    return f"{prefix}:" + _sha256_text(_canon(obj))[:24]
 
 
 def _as_dict(value: Any) -> dict:
@@ -1000,6 +985,35 @@ def _observed_result(payment_result: dict) -> dict:
     return first if first.get("ok") else {}
 
 
+def _payment_response_hash(observation: dict) -> str | None:
+    """The digest of an observed payment response, or None when none exists.
+
+    Hashing a dict of `None`s yields a fixed, well-formed `sha256:` digest that
+    reads as evidence of a response nobody observed, so the hash is computed
+    only from a structurally complete canonical observation. An unobserved or
+    incomplete candidate carries no responseHash, and therefore contributes no
+    privacy join reference either.
+    """
+    if not observation or observation.get("schemaVersion") != SPL_OBSERVATION_SCHEMA_VERSION:
+        return None
+    amount = _string(observation.get("amountBaseUnits"))
+    if amount is None or not amount.isdigit():
+        return None
+    index = _string(observation.get("instructionIndex"))
+    signature = _string(observation.get("signature"))
+    mint = _string(observation.get("mint"))
+    payee = _string(observation.get("destinationOwner"))
+    if index is None or signature is None or mint is None or payee is None:
+        return None
+    return _hash({
+        "signature": signature,
+        "instructionIndex": index,
+        "amount": amount,
+        "mint": mint,
+        "payee": payee,
+    })
+
+
 def _settlement_proof(observation: dict, identity: dict) -> dict:
     """Settlement proof built only from the payment observation.
 
@@ -1054,13 +1068,7 @@ def _build_receipt(
     rail = f"svm-spl-token-transfer-checked:{network}:{identity['asset']}"
     response_hash = trace["traceHash"]
     eval_report_hash = _hash({"gate": "vault-trace-determinism", "traceHash": response_hash, "status": eval_status})
-    payment_response_hash = _hash({
-        "signature": observation.get("signature"),
-        "instructionIndex": observation.get("instructionIndex"),
-        "amount": observation.get("amountBaseUnits"),
-        "mint": observation.get("mint"),
-        "payee": observation.get("destinationOwner"),
-    })
+    payment_response_hash = _payment_response_hash(observation)
     settlement = _settlement_proof(observation, identity)
     settlement_signature = settlement.get("signature")
     quote = {
@@ -1072,7 +1080,7 @@ def _build_receipt(
     }
     policy = _policy_decision(policy_allowed, ["allowed"] if policy_allowed else ["operator_denied"],
                               quote if policy_allowed else None, network=network)
-    prior = [payment_response_hash] if duplicate_payment else []
+    prior = [payment_response_hash] if duplicate_payment and payment_response_hash else []
     status = "attested" if eval_status == "pass" else "failed"
 
     receipt = {

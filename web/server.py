@@ -140,6 +140,13 @@ MAX_WAITLIST_ENTRIES = 100_000      # cap total stored signups (disk exhaustion)
 MAX_LEDGER_MATCHES = 10_000         # ring-buffer match history (disk exhaustion)
 SIGNUP_RATE_MAX = 20                # per-client signups allowed within the window
 FIGHT_RATE_MAX = 60                 # per-client match writes allowed within the window
+# The Devnet Preview runs the heaviest work on the surface (a full vault match,
+# weigh-ins, fixture load + rail-identity validation, receipt build and two
+# validation passes) for an unauthenticated caller, so it gets its own
+# deliberately conservative bucket: the UI makes one call per operator action,
+# far under this. It is a courtesy limit on a spoofable client key, not DDoS
+# protection; the hard bounds (body cap, key cap) do not depend on it.
+ASSURANCE_RATE_MAX = 20             # per-client Devnet Preview runs within the window
 SIGNUP_RATE_WINDOW = 60.0           # seconds
 SOCKET_READ_TIMEOUT = 15.0          # per-connection read timeout
 MAX_RATE_KEYS = 20_000              # hard cap on the rate-limit map (LRU-evicted)
@@ -523,9 +530,14 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         # The preview gate is checked BEFORE the body is read and before any
         # fixture is touched: with the flag off, /api/assurance is
-        # indistinguishable from an unknown path.
-        if path == "/api/assurance" and not ASSURANCE_PREVIEW_ENABLED:
-            return self._send({"error": "not found"}, 404)
+        # indistinguishable from an unknown path. The per-client limit follows
+        # it, still ahead of the body, so a rejected caller buys no JSON parse,
+        # no fixture read and no match run.
+        if path == "/api/assurance":
+            if not ASSURANCE_PREVIEW_ENABLED:
+                return self._send({"error": "not found"}, 404)
+            if not _rate_ok("assurance:" + _client_key(self), limit=ASSURANCE_RATE_MAX):
+                return self._send({"error": "rate limited"}, 429)
         req, err = self._read_body()
         if err:
             return
