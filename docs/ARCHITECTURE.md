@@ -9,10 +9,11 @@ for the game rules, `docs/VAULT-MATCH-RULESET-v0.1.md`.
                     adl/*.adl.yaml          ← the only source of truth
                           │                    about what a bot can do
                           ▼
-    ┌───────────────────────────────────────────────┐
-    │  core/arena.py     weigh-in · draft · match   │
-    │  core/chain.py     Solana payload projection  │
-    └───────────────────────────────────────────────┘
+    ┌───────────────────────────────────────────────────┐
+    │  core/arena.py      weigh-in · draft · match      │
+    │  core/chain.py      Solana payload projection     │
+    │  core/assurance.py  RAP Assurance preview adapter │
+    └───────────────────────────────────────────────────┘
         │              │                │
         ▼              ▼                ▼
    cli/arena.py   web/server.py   tools/simulate.py
@@ -32,6 +33,7 @@ byte-identical results. Any rule that exists in only one surface is a bug.
 | `tools/weigh_in.py` | AU weight formula and capability hash. Pure function of a validated ADL document. |
 | `core/arena.py` | League tiers, draft/hire evaluation, deterministic Vault match engine, trace emission. |
 | `core/chain.py` | Projects matches onto Quasar program payloads. Derives real PDAs. Submits nothing. |
+| `core/assurance.py` | Maps deterministic Arena traces plus fixture payment observations into canonical RAP receipt/integrity field names for the local Solana Devnet Preview. Submits nothing. |
 | `cli/arena.py` | Terminal surface: validate, weigh, market, draft, fight, replay, leaderboard, chain. |
 | `web/server.py` | Stdlib HTTP JSON API over the same core. No logic of its own. |
 | `web/static/index.html` | Single-file UI. No build step, no framework. |
@@ -93,6 +95,9 @@ one-line change.
 - Prizes are `ARENA-CREDIT` on `x402-dry-run`. Asserted in the test suite.
 - `core/chain.py` has no RPC client, no keypair handling, and no transaction
   builder. Every payload carries a `not-submitted` marker.
+- `core/assurance.py` uses deterministic parsed-payment fixtures and read-only
+  devnet metadata only; its boundary flags keep RPC, wallets, signing, custody,
+  official-mint observation, grant evidence, and external deployment false.
 - `audd_purse_plan()` hard-codes `paymentMode: "dry-run"` with no parameter to
   change it.
 - Match traces, ADL documents, and player metadata are explicitly listed as

@@ -33,7 +33,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tools"))
 
-from core import chain  # noqa: E402
+from core import assurance, chain  # noqa: E402
 from core.arena import (  # noqa: E402
     run_vault_match, evaluate_hire, weigh_competitor, advertised_price,
     load_adl, ARENA_CURRENCY, ARENA_RAIL, CLASS_NAMES,
@@ -404,6 +404,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(bots())
         if path == "/api/market":
             return self._send(mercs())
+        if path == "/api/assurance/scenarios":
+            return self._send(assurance.scenario_catalog())
         if path == "/api/leaderboard":
             return self._send(leaderboard())
         if path == "/api/waitlist":
@@ -509,6 +511,40 @@ class Handler(BaseHTTPRequestHandler):
             proj["auddPlan"] = chain.audd_purse_plan(
                 "50.00", "OwnerB2222", "OwnerB2222-settle", "2026-12-31T23:59:59Z")
             return self._send(proj)
+
+        if path == "/api/assurance":
+            # Local/public Devnet Preview only. These request fields are not used
+            # by the UI, but the explicit refusal boundary prevents a caller
+            # from trying to turn the preview endpoint into a wallet/RPC/live
+            # payment helper.
+            if req.get("network") not in (None, "solana-devnet"):
+                return self._send({"error": "Solana Devnet Preview only; mainnet/testnet/live rail requests are blocked"}, 400)
+            if req.get("paymentMode") not in (None, "fixture", "dry-run"):
+                return self._send({"error": "fixture/dry-run only; live payment mode is blocked"}, 400)
+            for flag in ("wallet", "sign", "submit", "rpc", "custody", "externalDeployment"):
+                if req.get(flag):
+                    return self._send({"error": f"{flag} is blocked in the local Devnet Preview"}, 400)
+            scenario = req.get("scenario") or "valid-receipt"
+            try:
+                seed = self._seed(req, 2)
+                a = self._load_bot(req.get("botA"))
+                b = self._load_bot(req.get("botB"))
+                if a is None or b is None:
+                    return self._send({"error": "unknown bot"}, 400)
+                ha = self._load_bot(req["hireA"]) if req.get("hireA") else None
+                hb = self._load_bot(req["hireB"]) if req.get("hireB") else None
+                if (req.get("hireA") and ha is None) or (req.get("hireB") and hb is None):
+                    return self._send({"error": "unknown hire"}, 400)
+                ca, cb = req.get("classA"), req.get("classB")
+                for cls in (ca, cb):
+                    if cls is not None and (not isinstance(cls, str) or cls not in CLASS_NAMES):
+                        return self._send({"error": "unknown class"}, 400)
+                bundle = assurance.build_assurance_preview(
+                    a, b, scenario=scenario, seed=seed, hire_a=ha, hire_b=hb,
+                    entered_a=ca, entered_b=cb)
+            except ValueError as exc:
+                return self._send({"error": str(exc)}, 400)
+            return self._send(bundle)
 
         if path == "/api/fight":
             if not _rate_ok("fight:" + _client_key(self), limit=FIGHT_RATE_MAX):

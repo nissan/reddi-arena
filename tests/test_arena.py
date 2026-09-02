@@ -1571,6 +1571,43 @@ for _name, _fn in _tampers.items():
 check("toolchain detection reports honestly",
       detect_toolchain()["canExecute"] is False or bool(detect_toolchain()["found"]))
 
+print("RAP Assurance Devnet Preview")
+from core import assurance
+_catalog = assurance.scenario_catalog()
+check("assurance catalog is explicitly local Solana Devnet Preview",
+      _catalog["boundary"]["cluster"] == "solana-devnet"
+      and _catalog["boundary"]["transactionSubmitted"] is False
+      and _catalog["boundary"]["walletSigning"] is False
+      and _catalog["boundary"]["officialMintObservation"] is False)
+_assurance_cases = {
+    "valid-receipt": ("accept", "release", []),
+    "tampered-trace": ("reject", "blocked", ["rap_assurance.evidence.trace_tampered"]),
+    "wrong-mint": ("reject", "blocked", ["rap_assurance.payment_observation.wrong_mint"]),
+    "wrong-payee": ("reject", "blocked", ["rap_assurance.payment_observation.wrong_payee"]),
+    "duplicate-replay": ("reject", "blocked", ["rap_assurance.payment_observation.replay_detected",
+                                                 "rap_receipt.replay.duplicate_payment"]),
+    "refund-gate-failed": ("reject", "refund", ["rap_receipt.eval.failed"]),
+    "authorization-denied": ("reject", "blocked", ["rap_receipt.authority.scope_mismatch"]),
+}
+for _case, (_decision, _settlement, _codes) in _assurance_cases.items():
+    _bundle = assurance.build_assurance_preview(DEF, RAID, scenario=_case, seed=2)
+    _result = _bundle["adapters"]["receiptIntegrity"]["result"]
+    _seen = {d["code"] for d in _result["diagnostics"]}
+    check(f"assurance scenario {_case} gives {_decision}/{_settlement}",
+          _result["decision"] == _decision
+          and _bundle["settlement"]["decision"] == _settlement
+          and all(c in _seen for c in _codes))
+_valid = assurance.build_assurance_preview(DEF, RAID, scenario="valid-receipt", seed=2)
+check("valid assurance receipt uses canonical RAP receipt/policy versions",
+      _valid["receipt"]["schemaVersion"] == "reddi.receipt.v1"
+      and _valid["receipt"]["policyDecision"]["schemaVersion"] == "reddi.policy-decision.v1")
+check("valid assurance payment observation is fixture-backed and never grant evidence",
+      _valid["adapters"]["paymentObservation"]["result"]["observation"]["evidence"]
+      == {"source": "parsed-transaction-fixture", "grantEligible": False})
+check("assurance preview explains payment transfer is not paid work proof",
+      any(a["id"] == "rap-assurance-paid-work" and "Payment alone" in a["boundary"]
+          for a in _valid["assertions"]))
+
 print("balance regression (issue B7)")
 from tools.simulate import round_robin, mirror_position_bias, powerup_impact, BANDS, ARCHETYPES
 
@@ -1674,6 +1711,34 @@ def _req(method, path, body=None, token=None):
     except _uerror.HTTPError as e:
         return e.code, _wjson.loads(e.read())
 
+
+_s, _b = _req("GET", "/api/assurance/scenarios")
+check("assurance API publishes the deterministic scenario catalog",
+      _s == 200 and any(s["id"] == "valid-receipt" for s in _b["scenarios"])
+      and _b["boundary"]["rpcCall"] is False)
+_s, _b = _req("POST", "/api/assurance",
+              {"botA": "antweight-vault-defender.adl.yaml",
+               "botB": "antweight-vault-raider.adl.yaml",
+               "scenario": "wrong-mint", "seed": 2})
+check("assurance API executes refusal scenarios without ledger writes",
+      _s == 200 and _b["adapters"]["receiptIntegrity"]["result"]["decision"] == "reject"
+      and _b["settlement"]["decision"] == "blocked"
+      and not _srv.LEDGER.exists())
+_s, _b = _req("POST", "/api/assurance",
+              {"botA": "antweight-vault-defender.adl.yaml",
+               "botB": "antweight-vault-raider.adl.yaml",
+               "network": "solana-mainnet-beta"})
+check("assurance API refuses non-devnet preview requests", _s == 400)
+_s, _b = _req("POST", "/api/assurance",
+              {"botA": "antweight-vault-defender.adl.yaml",
+               "botB": "antweight-vault-raider.adl.yaml",
+               "paymentMode": "live"})
+check("assurance API refuses live payment mode", _s == 400)
+_s, _b = _req("POST", "/api/assurance",
+              {"botA": "antweight-vault-defender.adl.yaml",
+               "botB": "antweight-vault-raider.adl.yaml",
+               "wallet": True})
+check("assurance API refuses wallet/signing escalation flags", _s == 400)
 
 _s, _b = _req("POST", "/api/waitlist", {"email": "Player@Example.com", "roles": ["compete"]})
 check("waitlist signup works and normalizes case", _s == 200 and _b["ok"] and _b["position"] == 1)

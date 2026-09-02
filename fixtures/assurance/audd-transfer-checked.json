@@ -1,0 +1,73 @@
+{
+  "fixtureId": "arena-rap-assurance-audd-transfer-checked-v1",
+  "boundary": "Deterministic parsed Solana devnet TransferChecked fixture for RAP Assurance preview. It is not a live RPC observation, not an official AUDD mint observation, not grant evidence, not custody, and not settlement finality.",
+  "expected": {
+    "network": "solana-devnet",
+    "signature": "fixtureAuddTransferCheckedSignature1111111111111111",
+    "mint": "AUDDttiEpCydTm7joUMbYddm72jAWXZnCpPZtDoxqBSw",
+    "tokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+    "payTo": "3mL7kbtz3eK24vJ6wftjnLvhZrf93B71UEjB2DBDAddr",
+    "amountBaseUnits": "2500000",
+    "destinationTokenAccount": "destination-audd-token-account-fixture",
+    "authority": "6uiQbwMor4UrWYiDtAJcgHKYW4vUaM3BUVChPgzdALse",
+    "decimals": 6,
+    "memo": "reddi:pay:fixture-audd-intent",
+    "memoRequired": true,
+    "paymentIntentId": "reddi.payment-intent:fixture-audd-intent"
+  },
+  "parsedTransaction": {
+    "slot": 443284058,
+    "blockTime": 1785523200,
+    "meta": {
+      "err": null,
+      "postTokenBalances": [
+        {
+          "accountIndex": 1,
+          "mint": "AUDDttiEpCydTm7joUMbYddm72jAWXZnCpPZtDoxqBSw",
+          "owner": "3mL7kbtz3eK24vJ6wftjnLvhZrf93B71UEjB2DBDAddr",
+          "programId": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+          "uiTokenAmount": {
+            "amount": "2500000",
+            "decimals": 6,
+            "uiAmountString": "2.5"
+          }
+        }
+      ],
+      "innerInstructions": []
+    },
+    "transaction": {
+      "signatures": ["fixtureAuddTransferCheckedSignature1111111111111111"],
+      "message": {
+        "accountKeys": [
+          "source-audd-token-account-fixture",
+          "destination-audd-token-account-fixture"
+        ],
+        "instructions": [
+          {
+            "programId": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+            "program": "spl-token",
+            "parsed": {
+              "type": "transferChecked",
+              "info": {
+                "source": "source-audd-token-account-fixture",
+                "destination": "destination-audd-token-account-fixture",
+                "mint": "AUDDttiEpCydTm7joUMbYddm72jAWXZnCpPZtDoxqBSw",
+                "authority": "6uiQbwMor4UrWYiDtAJcgHKYW4vUaM3BUVChPgzdALse",
+                "tokenAmount": {
+                  "amount": "2500000",
+                  "decimals": 6,
+                  "uiAmountString": "2.5"
+                }
+              }
+            }
+          },
+          {
+            "programId": "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr",
+            "program": "spl-memo",
+            "parsed": "reddi:pay:fixture-audd-intent"
+          }
+        ]
+      }
+    }
+  }
+}

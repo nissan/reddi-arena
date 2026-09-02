@@ -33,6 +33,9 @@ python3 cli/arena.py chain antweight-vault-defender.adl.yaml \
                      antweight-vault-raider.adl.yaml --audd 50.00
 python3 cli/arena.py chain ... --fail-gate    # payout blocked despite a completed match
 python3 cli/arena.py chain ... --no-attest    # dispute instead of payout
+
+# local/public Solana Devnet Preview — RAP Assurance fixtures, writes nothing
+curl -s http://127.0.0.1:8000/api/assurance/scenarios
 ```
 
 ## Web
@@ -49,7 +52,8 @@ python3 web/server.py 8000
 Waitlist emails are stored locally in `core/waitlist.json`. There is no account
 system and no published retention policy — the landing page says so plainly.
 
-Five tabs: **The Arena** (weigh in, draft, fight, coached replay), **Power-Up
+Six tabs: **The Arena** (weigh in, draft, fight, coached replay), **Devnet
+Preview** (local RAP Assurance receipt and tamper/replay fixtures), **Power-Up
 Market** (specialists for hire), **Leaderboard**, **Build a Power-Up** (the ADL
 shape for sellers), **On-Chain** (the Solana projection).
 
@@ -93,6 +97,7 @@ its price and the capability it grants. Competitors hire it in the draft. See
 | Deterministic Vault matches + replay | Live model-driven competitors — separate approval-gated lane |
 | Arena-credit prizes on dry-run rail | Any devnet write — needs scoped operator approval |
 | On-chain payload projection with **real PDAs** (`find_program_address`) | Actual submission — no RPC/wallet/signing exists in this codebase |
+| Local Solana Devnet Preview for RAP Assurance receipts and negative fixtures | Real devnet writes, official AUDD mint observation, grant evidence, custody, or external deployment |
 | Offline rehearsal preflight — 33 checks against `programs/escrow` constraints | Running a validator — needs surfpool/solana-test-validator installed |
 | AUDD payment plans (`reddi.audd-payment-plan.v1`, dry-run) | AUDD custody, SPL escrow, settlement finality |
 

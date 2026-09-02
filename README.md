@@ -88,10 +88,12 @@ web, on the honest dry-run lane. Start here:
   so the power-up market can become a true priced marketplace at ADL v0.3.
 
 What you can do right now: weigh in a bot, browse power-ups for hire, get refused
-for busting your weight class, enter a heavier class, win the rematch, and climb
-a leaderboard — with every match deterministic and every fighter validated
-against the canonical ADL v0.2 schema. Prizes are arena credits on the
-`x402-dry-run` rail; no real value moves.
+for busting your weight class, enter a heavier class, win the rematch, inspect a
+local Solana Devnet Preview RAP Assurance receipt with tamper/replay fixtures,
+and climb a leaderboard — with every match deterministic and every fighter
+validated against the canonical ADL v0.2 schema. Prizes are arena credits on the
+`x402-dry-run` rail; no real value moves. The RAP Assurance preview is local
+fixture evidence only and is not externally deployed by this change.
 
 ## Current recommendation — read this first
 
@@ -109,6 +111,7 @@ findings. The plan documents are retained as design, not as work.
 | `adl/mercenary-source-auditor.adl.yaml` | Reference hireable specialist with bounded x402 dry-run intent, 91 AU — **validates** |
 | `docs/REVISED-RECOMMENDATION.md` | **The actual proposal** — cut to fit the launch window |
 | `docs/FINDINGS.md` | Drift log, findings (2 novel, 3 confirmed, 1 withdrawn), 11 plan corrections |
+| `docs/DEVNET-PREVIEW-RAP-ASSURANCE.md` | Local Solana Devnet Preview boundaries, fixtures, and contribution path |
 | `fixtures/negative/charge-intent-unbounded.yaml` | Minimal repro of the charge-intent gap (F-001) |
 | `vendor/ADL-v0.2.schema.json` | Pinned canonical schema |
 | `tools/validate_adl.py` | Schema-validation gate (T-001, T-002) |
