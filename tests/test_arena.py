@@ -2721,10 +2721,10 @@ for _label, _flag_v, _ctx_v in (("ctx-missing", "true", None),
 # where they are running. Every other disclosure survives enablement.
 _srv_hosted = _lift_assurance_rate_limit(_load_server("true", "hosted", "ctx-hosted"))
 _port_hosted = _serve(_srv_hosted)
-for _mod, _port, _name, _external in ((_srv, _port, "local", False),
-                                      (_srv_hosted, _port_hosted, "hosted", True)):
-    _cat = _wjson.loads(_call(_port, "GET", "/api/assurance/scenarios")[1])
-    _bun = _wjson.loads(_call(_port, "POST", "/api/assurance", _preview_body)[1])
+for _mod, _mport, _name, _external in ((_srv, _port, "local", False),
+                                       (_srv_hosted, _port_hosted, "hosted", True)):
+    _cat = _wjson.loads(_call(_mport, "GET", "/api/assurance/scenarios")[1])
+    _bun = _wjson.loads(_call(_mport, "POST", "/api/assurance", _preview_body)[1])
     check(f"gate {_name}-enabled: preview served, externalDeployment is {_external}",
           _mod.ASSURANCE_PREVIEW_ENABLED
           and _mod.ASSURANCE_EXTERNAL_DEPLOYMENT is _external
@@ -2962,20 +2962,31 @@ _rl_limit = _rl_mod.ASSURANCE_RATE_MAX
 _s_rl, _b_rl = _call(_rl_port, "POST", "/api/assurance", _preview_body)
 check("an over-limit preview request gets the stable sanitized 429 contract",
       _s_rl == 429 and _wjson.loads(_b_rl) == {"error": "rate limited"})
-# Nothing downstream of the limiter runs: a fixture that could only produce a
-# sanitized 500 still answers 429, and no match reaches the ledger.
+# The limiter short-circuits before the fixture is touched. The sabotaged
+# fixture is the probe, and the admitted request is its disconfirming control:
+# the same broken path answers with the sanitized 500 the moment the limiter
+# lets a call through, so the 429 above it is evidence of a read that did not
+# happen rather than a trivially true code.
 _real_rl = _rl_mod.assurance.FIXTURE_PATH
+_rl_window = _rl_mod.SIGNUP_RATE_WINDOW
 try:
     _rl_mod.assurance.FIXTURE_PATH = Path("/nonexistent/assurance-fixture.json")
     _s_rl, _b_rl = _call(_rl_port, "POST", "/api/assurance", _preview_body)
+    _rl_mod.SIGNUP_RATE_WINDOW = 0.0
+    _s_rl_ctl, _b_rl_ctl = _call(_rl_port, "POST", "/api/assurance", _preview_body)
 finally:
     _rl_mod.assurance.FIXTURE_PATH = _real_rl
-check("a rejected preview request reads no fixture and runs no match",
+    _rl_mod.SIGNUP_RATE_WINDOW = _rl_window
+check("a rate-limited preview request reads no fixture, unlike an admitted one",
       _s_rl == 429 and _wjson.loads(_b_rl) == {"error": "rate limited"}
-      and not _rl_mod.LEDGER.exists())
+      and _s_rl_ctl == 500
+      and "unavailable" in _wjson.loads(_b_rl_ctl)["error"])
+check("a rate-limited preview response carries no assurance work product",
+      set(_wjson.loads(_b_rl)) == {"error"}
+      and not {"receipt", "trace", "scenario", "adapters", "settlement"}
+      & set(_wjson.loads(_b_rl)))
 # It is a fixed window, not a permanent lockout: once the recorded hits fall
 # outside it the same client is served again.
-_rl_window = _rl_mod.SIGNUP_RATE_WINDOW
 try:
     _rl_mod.SIGNUP_RATE_WINDOW = 0.0
     _s_rl, _b_rl = _call(_rl_port, "POST", "/api/assurance", _preview_body)
