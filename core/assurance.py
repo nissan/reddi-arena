@@ -382,7 +382,42 @@ def load_payment_fixture() -> dict:
             "Devnet preview fixtures must never carry the official AUDD mainnet mint; "
             f"use {AUDD_DETERMINISTIC_FIXTURE_MINT}"
         )
+    _destination_balance(fixture["parsedTransaction"],
+                         _transfer_instruction_info(fixture["parsedTransaction"]))
     return fixture
+
+
+def _transfer_instruction_info(parsed: dict) -> dict:
+    for item in _collect_instructions(parsed):
+        if _is_transfer_checked(item["instruction"]):
+            info = _get_path(item["instruction"], "parsed", "info")
+            if isinstance(info, dict):
+                return info
+    raise AssuranceIntegrityError(
+        "preview fixture has no parsed TransferChecked instruction with an info object")
+
+
+def _destination_balance(parsed: dict, info: dict) -> dict:
+    destination = _string(info.get("destination"))
+    for item in _as_list(_get_path(parsed, "meta", "postTokenBalances")):
+        if isinstance(item, dict) and _account_key_at(parsed, item.get("accountIndex")) == destination:
+            return item
+    raise AssuranceIntegrityError(
+        "preview fixture has no meta.postTokenBalances entry for the transfer destination account")
+
+
+def _break_field(container: dict, key: str, value: Any, what: str) -> None:
+    """Apply a refusal-scenario mutation, refusing if it would change nothing.
+
+    A no-op mutation would leave an untouched, verifiable payment presented
+    under a refusal scenario, so the scenario would report accept for the very
+    defect it exists to demonstrate.
+    """
+    if container.get(key) == value:
+        raise AssuranceIntegrityError(
+            f"preview scenario cannot be constructed: the {what} already holds the value "
+            "the scenario must change, so the refusal it demonstrates would not occur")
+    container[key] = value
 
 
 def _sha256_text(text: str) -> str:
@@ -417,13 +452,6 @@ def _get_path(root: Any, *path: Any) -> Any:
                 return None
             cur = cur.get(part)
     return cur
-
-
-def _set_path(root: Any, path: tuple[Any, ...], value: Any) -> None:
-    cur = root
-    for part in path[:-1]:
-        cur = cur[part]
-    cur[path[-1]] = value
 
 
 def _positive_int(value: Any) -> bool:
@@ -846,7 +874,6 @@ def _build_receipt(
     observed = _observed_result(payment_result)
     observation = _as_dict(observed.get("observation"))
     replay_key = observed.get("replayKey")
-    amount = int(expected["amountBaseUnits"])
     payer = expected["authority"]
     payee = expected["payTo"]
     request = _request_envelope(trace, scenario)
@@ -1117,8 +1144,8 @@ def _validate_receipt_semantics(receipt: dict) -> list[dict]:
     return diagnostics
 
 
-def validate_assurance(receipt: dict | None, trace: dict, payment_result: dict, policy_allowed: bool = True,
-                       structural: list[dict] | None = None) -> dict:
+def _assurance_verdict(receipt: dict | None, trace: dict, payment_result: dict, policy_allowed: bool,
+                       structural: list[dict]) -> dict:
     diagnostics: list[dict] = []
     if not policy_allowed:
         diagnostics.append(_diag("rap_receipt.authority.scope_mismatch", "Delegated authority denied this resource; no payment/work receipt may be accepted.", "authority", "policyDecision"))
@@ -1128,7 +1155,7 @@ def validate_assurance(receipt: dict | None, trace: dict, payment_result: dict, 
     if receipt is None:
         diagnostics.append(_diag("rap_receipt.envelope.required", "No RAP receipt was emitted for this denied/no-payment path.", "envelope", "receipt"))
     else:
-        diagnostics.extend(structural if structural is not None else _validate_receipt_layers(receipt))
+        diagnostics.extend(structural)
         diagnostics.extend(_validate_receipt_semantics(receipt))
         recomputed = _trace_hash(trace)
         if trace.get("traceHash") != recomputed:
@@ -1146,16 +1173,26 @@ def validate_assurance(receipt: dict | None, trace: dict, payment_result: dict, 
     return {"decision": decision, "diagnostics": diagnostics}
 
 
+def validate_assurance(receipt: dict | None, trace: dict, payment_result: dict,
+                       policy_allowed: bool = True) -> dict:
+    """Public verdict: always runs its own structural pass over the receipt."""
+    return _assurance_verdict(receipt, trace, payment_result, policy_allowed,
+                              _validate_receipt_layers(receipt) if receipt is not None else [])
+
+
 def _scenario_fixture(scenario: str, fixture: dict) -> tuple[dict, dict | None]:
     parsed = copy.deepcopy(fixture["parsedTransaction"])
     expected = copy.deepcopy(fixture["expected"])
     replay_store = None
     if scenario == "wrong-mint":
         wrong = "WrongAuddMint1111111111111111111111111111111"
-        _set_path(parsed, ("transaction", "message", "instructions", 0, "parsed", "info", "mint"), wrong)
-        _set_path(parsed, ("meta", "postTokenBalances", 0, "mint"), wrong)
+        info = _transfer_instruction_info(parsed)
+        _break_field(info, "mint", wrong, "transfer instruction mint")
+        _break_field(_destination_balance(parsed, info), "mint", wrong, "destination token balance mint")
     elif scenario == "wrong-payee":
-        _set_path(parsed, ("meta", "postTokenBalances", 0, "owner"), expected["authority"])
+        info = _transfer_instruction_info(parsed)
+        _break_field(_destination_balance(parsed, info), "owner", expected["authority"],
+                     "destination token account owner")
     elif scenario == "duplicate-replay":
         replay_store = ReplayStore()
     return {"expected": expected, "parsedTransaction": parsed}, replay_store
@@ -1243,8 +1280,7 @@ def build_assurance_preview(
     )
     presented_trace = _tamper_trace(trace) if scenario == "tampered-trace" else trace
     structural = _validate_receipt_layers(receipt) if receipt is not None else []
-    assurance = validate_assurance(receipt, presented_trace, payment_result,
-                                   policy_allowed=policy_allowed, structural=structural)
+    assurance = _assurance_verdict(receipt, presented_trace, payment_result, policy_allowed, structural)
     gates_passed = eval_status == "pass" and policy_allowed
     attested = eval_status == "pass" and policy_allowed
     settlement = chain.settle_match(trace, gates_passed, attested, "fixture-operator", "arena-referee", 100_000_000)

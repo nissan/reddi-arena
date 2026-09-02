@@ -1716,6 +1716,17 @@ def _fixture_load_outcome(text):
         assurance.FIXTURE_PATH = _real_fixture_path
         _path.unlink()
 
+def _swap_only_instruction_for_memo(fixture):
+    fixture["parsedTransaction"]["transaction"]["message"]["instructions"] = [
+        {"programId": assurance.SPL_MEMO_PROGRAM_ID, "program": "spl-memo", "parsed": "reddi:pay:x"}]
+    return fixture
+
+
+def _empty_post_token_balances(fixture):
+    fixture["parsedTransaction"]["meta"]["postTokenBalances"] = []
+    return fixture
+
+
 _good_fixture_text = _real_fixture_path.read_text()
 _broken_fixtures = {
     "truncated json": "",
@@ -1726,12 +1737,77 @@ _broken_fixtures = {
         {k: v for k, v in _json_ass.loads(_good_fixture_text).items() if k != "fixtureId"}),
     "non-numeric amount": _good_fixture_text.replace('"amountBaseUnits": "2500000"',
                                                      '"amountBaseUnits": "abc"', 1),
-    "wrong-typed expected": _good_fixture_text.replace('"expected": {', '"expected": [{', 1)[:-1],
+    "wrong-typed expected": _json_ass.dumps(
+        {**_json_ass.loads(_good_fixture_text), "expected": []}),
+    "wrong-typed parsedTransaction": _json_ass.dumps(
+        {**_json_ass.loads(_good_fixture_text), "parsedTransaction": "not-an-object"}),
+    "memo instruction where the transfer should be": _json_ass.dumps(
+        _swap_only_instruction_for_memo(_json_ass.loads(_good_fixture_text))),
+    "no destination token balance": _json_ass.dumps(
+        _empty_post_token_balances(_json_ass.loads(_good_fixture_text))),
 }
 for _label, _text in _broken_fixtures.items():
     check(f"a {_label} fixture is a server integrity failure, not a caller error",
           _fixture_load_outcome(_text) == "integrity")
 assurance.FIXTURE_PATH = _real_fixture_path
+
+# A refusal scenario whose mutation is a no-op would present an untouched,
+# verifiable payment under a "wrong X" card and report accept for the very
+# defect it exists to demonstrate. It must refuse loudly instead.
+def _preview_outcome(fixture_doc, scenario):
+    with _tmp_ass.NamedTemporaryFile("w", suffix=".json", delete=False) as _f:
+        _f.write(_json_ass.dumps(fixture_doc))
+        _path = Path(_f.name)
+    try:
+        assurance.FIXTURE_PATH = _path
+        try:
+            return assurance.build_assurance_preview(DEF, RAID, scenario=scenario, seed=2)
+        except assurance.AssuranceIntegrityError:
+            return "integrity"
+        except Exception as exc:
+            return type(exc).__name__
+    finally:
+        assurance.FIXTURE_PATH = _real_fixture_path
+        _path.unlink()
+
+_self_custodial = _json_ass.loads(_good_fixture_text)
+_self_custodial["expected"]["authority"] = _self_custodial["expected"]["payTo"]
+_self_custodial["parsedTransaction"]["transaction"]["message"]["instructions"][0][
+    "parsed"]["info"]["authority"] = _self_custodial["expected"]["payTo"]
+check("a wrong-payee scenario that cannot be built refuses instead of reporting accept",
+      _preview_outcome(_self_custodial, "wrong-payee") == "integrity")
+_already_wrong_mint = _json_ass.loads(_good_fixture_text)
+for _node in (_already_wrong_mint["parsedTransaction"]["transaction"]["message"]["instructions"][0]["parsed"]["info"],
+              _already_wrong_mint["parsedTransaction"]["meta"]["postTokenBalances"][0],
+              _already_wrong_mint["expected"]):
+    _node["mint"] = "WrongAuddMint1111111111111111111111111111111"
+check("a wrong-mint scenario that cannot be built refuses instead of reporting accept",
+      _preview_outcome(_already_wrong_mint, "wrong-mint") == "integrity")
+# The same fixture still builds the scenarios it can honestly construct.
+check("a self-custodial fixture still serves the scenarios it can construct",
+      _preview_outcome(_self_custodial, "valid-receipt")["adapters"]["receiptIntegrity"][
+          "result"]["decision"] == "accept")
+
+# Scenario construction reaches into parsedTransaction, so a shape defect there
+# must surface as an integrity fault, not a TypeError/IndexError that escapes
+# both /api/assurance handlers and kills the request with no HTTP response.
+for _label, _doc in (("memo where the transfer should be", _swap_only_instruction_for_memo(
+                          _json_ass.loads(_good_fixture_text))),
+                     ("no destination token balance", _empty_post_token_balances(
+                          _json_ass.loads(_good_fixture_text)))):
+    check(f"a fixture with {_label} is an integrity fault during scenario construction",
+          _preview_outcome(_doc, "wrong-mint") == "integrity")
+
+# validate_assurance is the honest-refusal entry point; it must always run its
+# own structural pass rather than accept a caller-supplied one.
+_hollow = {k: v for k, v in _valid["receipt"].items()
+           if k not in ("paymentEvidence", "settlementProgramProof", "replayIdempotency")}
+_hollow_verdict = assurance.validate_assurance(
+    _hollow, _valid["trace"], assurance._payment_for_scenario("valid-receipt"))
+check("validate_assurance cannot be told to skip its structural pass",
+      _hollow_verdict["decision"] == "reject"
+      and {"rap_receipt.payment.required", "rap_receipt.settlement.required",
+           "rap_receipt.replay.required"} <= {d["code"] for d in _hollow_verdict["diagnostics"]})
 
 # _owner_status can refuse on four dimensions; the reported `expected` value
 # must name the dimension that actually failed, not always the payee.

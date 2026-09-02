@@ -96,10 +96,20 @@ in `paymentEvidence` values or the settlement proof.
 
 A fixture that is unreadable, unparseable, or the wrong shape is a server-side
 defect, not caller error: `load_payment_fixture()` validates the file, its
-required top-level keys, its expected-terms keys, and the base-unit amount, and
-raises `AssuranceIntegrityError`, which `/api/assurance` answers with a
-sanitized 500 plus a bounded server-side log line. Only malformed client input
-(an unknown or non-string `scenario`) is a 400.
+required top-level keys, its expected-terms keys, the base-unit amount, and the
+`parsedTransaction` paths every scenario reaches into (a parsed
+`TransferChecked` instruction and the `postTokenBalances` entry for its
+destination account). Each failure raises `AssuranceIntegrityError`, which
+`/api/assurance` answers with a sanitized 500 plus a bounded server-side log
+line. Only malformed client input (an unknown or non-string `scenario`) is
+a 400.
+
+The refusal scenarios locate their mutation targets semantically rather than by
+position, and each mutation must actually change the document. If a contributed
+fixture already holds the value a scenario needs to break — a self-custodial
+fixture whose payer already owns the destination, say — the scenario refuses as
+an integrity fault rather than presenting an untouched, verifiable payment
+under a "wrong mint" or "wrong payee" card.
 
 When a payment *was* observed, `replayIdempotency.idempotencyKey` extends the
 verifier's own consume-once replay key — network, signature, and the exact
