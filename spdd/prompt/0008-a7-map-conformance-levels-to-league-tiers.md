@@ -66,7 +66,7 @@ Primary surfaces for this lane: adl/, vendor/, tools/validate_adl.py, fixtures/
 ## Claude Code prompt
 
 ```text
-You are working in nissan/reddi-arena. Read CLAUDE.md first, then read spdd/prompt/0008-a7-map-conformance-levels-to-league-tiers.md
+You are working in nissan/reddi-arena. Read AGENTS.md first, then read spdd/prompt/0008-a7-map-conformance-levels-to-league-tiers.md
 in full — it is the binding REASONS-LITE artifact for this issue and must be
 updated in the same PR if your implementation diverges from it.
 

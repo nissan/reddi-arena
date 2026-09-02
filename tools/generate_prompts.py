@@ -96,7 +96,7 @@ def claude_code_prompt(issue: dict, epic: dict, artifact_path: str) -> str:
     deps = ", ".join(issue.get("dependsOn") or []) or "none"
     tests = ", ".join(issue.get("tests") or [])
     return f"""```text
-You are working in {REPO}. Read CLAUDE.md first, then read {artifact_path}
+You are working in {REPO}. Read AGENTS.md first, then read {artifact_path}
 in full — it is the binding REASONS-LITE artifact for this issue and must be
 updated in the same PR if your implementation diverges from it.
 

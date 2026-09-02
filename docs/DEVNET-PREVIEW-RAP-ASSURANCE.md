@@ -134,6 +134,17 @@ never claims index `0`.
 | Blocked | mainnet, live value, wallets, secrets, signing, custody, RPC, transaction submission, external deployment, official-mint observation, grant evidence |
 | Separately approval-gated | Any real Solana devnet write, live payment, wallet/RPC scope, spend cap, or externally hosted launch |
 
+"Blocked: external deployment" is a statement about this repository's
+actions, not a runtime gate. This change ships no deployment, and shipping the
+hosted preview is an operator action with its own runbook (`docs/OPERATIONS.md`).
+But the preview has no server-side feature flag: once this tree is deployed,
+`/play`'s Devnet Preview tab and `/api/assurance` are reachable at the public
+URL. Every other boundary in the table above still holds when hosted — the
+preview is still fixture-only, with no wallet, RPC, signing, submission, or
+custody path — so deploying it exposes the preview, never live value. Hosting it
+publicly is the "externally hosted launch" that stays separately approval-gated,
+including its messaging.
+
 ## Contribution path
 
 1. Add the smallest deterministic fixture under `fixtures/assurance/`.

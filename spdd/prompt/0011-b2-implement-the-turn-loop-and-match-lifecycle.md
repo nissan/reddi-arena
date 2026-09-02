@@ -65,7 +65,7 @@ Primary surfaces for this lane: core/arena.py, tools/simulate.py, tests/
 ## Claude Code prompt
 
 ```text
-You are working in nissan/reddi-arena. Read CLAUDE.md first, then read spdd/prompt/0011-b2-implement-the-turn-loop-and-match-lifecycle.md
+You are working in nissan/reddi-arena. Read AGENTS.md first, then read spdd/prompt/0011-b2-implement-the-turn-loop-and-match-lifecycle.md
 in full — it is the binding REASONS-LITE artifact for this issue and must be
 updated in the same PR if your implementation diverges from it.
 

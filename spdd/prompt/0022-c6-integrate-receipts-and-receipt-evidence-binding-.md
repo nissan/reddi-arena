@@ -70,7 +70,7 @@ Primary surfaces for this lane: core/chain.py, tools/rehearse.py (integrating @r
 ## Claude Code prompt
 
 ```text
-You are working in nissan/reddi-arena. Read CLAUDE.md first, then read spdd/prompt/0022-c6-integrate-receipts-and-receipt-evidence-binding-.md
+You are working in nissan/reddi-arena. Read AGENTS.md first, then read spdd/prompt/0022-c6-integrate-receipts-and-receipt-evidence-binding-.md
 in full — it is the binding REASONS-LITE artifact for this issue and must be
 updated in the same PR if your implementation diverges from it.
 
