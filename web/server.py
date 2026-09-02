@@ -64,13 +64,45 @@ ADMIN_TOKEN = os.environ.get("ARENA_ADMIN_TOKEN", "")
 ASSURANCE_PREVIEW_FLAG = "REDDI_ENABLE_SOLANA_DEVNET_ASSURANCE_PREVIEW"
 ASSURANCE_PREVIEW_TRUE_VALUES = ("true", "1")
 
+# The second half of the gate: an explicit operator declaration of WHERE the
+# preview is being served. The closed value set is "off" / "local" / "hosted",
+# and anything else — absent, empty, misspelled, wrong case — is off. "hosted"
+# is a capability this server can be configured with, never something this repo
+# sets: declaring it is a separately approved operator action, because enabling
+# the preview on an externally hosted service exposes it publicly. The context
+# is also the only truthful source for the externalDeployment boundary flag.
+ASSURANCE_CONTEXT_VAR = "REDDI_SOLANA_DEVNET_ASSURANCE_DEPLOYMENT_CONTEXT"
+ASSURANCE_CONTEXT_VALUES = ("off", "local", "hosted")
+ASSURANCE_CONTEXT_EXPOSING = ("local", "hosted")
+
 
 def preview_enabled(value) -> bool:
     """True only for an exact documented opt-in value."""
     return value in ASSURANCE_PREVIEW_TRUE_VALUES
 
 
-ASSURANCE_PREVIEW_ENABLED = preview_enabled(os.environ.get(ASSURANCE_PREVIEW_FLAG))
+def deployment_context(value) -> str:
+    """The declared context, or "off" for absent/malformed/unknown values."""
+    return value if value in ASSURANCE_CONTEXT_VALUES else "off"
+
+
+def preview_exposure(flag_value, context_value):
+    """(enabled, external_deployment) for one flag/context pair.
+
+    Exposure needs BOTH halves: an exact opt-in flag value AND an exact
+    local/hosted context. Any other combination — flag on with no context, a
+    valid context with the flag off, a malformed either — is off, and
+    external_deployment is then None: unknown, never inferred False.
+    """
+    context = deployment_context(context_value)
+    if not preview_enabled(flag_value) or context not in ASSURANCE_CONTEXT_EXPOSING:
+        return False, None
+    return True, context == "hosted"
+
+
+ASSURANCE_DEPLOYMENT_CONTEXT = deployment_context(os.environ.get(ASSURANCE_CONTEXT_VAR))
+ASSURANCE_PREVIEW_ENABLED, ASSURANCE_EXTERNAL_DEPLOYMENT = preview_exposure(
+    os.environ.get(ASSURANCE_PREVIEW_FLAG), os.environ.get(ASSURANCE_CONTEXT_VAR))
 
 # When the preview is off the marked regions of index.html are stripped before
 # the page is served, so the Devnet Preview tab, panel and its client code are
@@ -429,10 +461,19 @@ class Handler(BaseHTTPRequestHandler):
             return None, True
         raw = self.rfile.read(length) if length > 0 else b""
         try:
-            return json.loads(raw or "{}"), None
+            body = json.loads(raw or "{}")
         except (ValueError, UnicodeDecodeError):
             self._send({"error": "invalid JSON"}, 400)
             return None, True
+        # Every POST route reads named fields, so a top-level array, scalar,
+        # string or null is caller error, not a request to serve. Rejecting it
+        # here — before any route sees it — is the only place that holds for
+        # all of them, and keeps a `.get` on a non-object from killing the
+        # connection with no response at all.
+        if not isinstance(body, dict):
+            self._send({"error": "request body must be a JSON object"}, 400)
+            return None, True
+        return body, None
 
     def do_GET(self):
         path = urlparse(self.path).path
@@ -454,7 +495,8 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/assurance/scenarios":
             if not ASSURANCE_PREVIEW_ENABLED:
                 return self._send({"error": "not found"}, 404)
-            return self._send(assurance.scenario_catalog())
+            return self._send(
+                assurance.scenario_catalog(ASSURANCE_EXTERNAL_DEPLOYMENT))
         if path == "/api/leaderboard":
             return self._send(leaderboard())
         if path == "/api/waitlist":
@@ -597,7 +639,8 @@ class Handler(BaseHTTPRequestHandler):
                         return self._send({"error": "unknown class"}, 400)
                 bundle = assurance.build_assurance_preview(
                     a, b, scenario=scenario, seed=seed, hire_a=ha, hire_b=hb,
-                    entered_a=ca, entered_b=cb)
+                    entered_a=ca, entered_b=cb,
+                    external_deployment=ASSURANCE_EXTERNAL_DEPLOYMENT)
             except assurance.AssuranceIntegrityError as exc:
                 print(f"[assurance] preview integrity failure: {exc}", flush=True)
                 return self._send(

@@ -44,8 +44,9 @@ curl -s http://127.0.0.1:8000/api/assurance/scenarios
 ```bash
 python3 web/server.py 8000
 
-# with the Solana Devnet Preview tab (off by default, exact value required)
-REDDI_ENABLE_SOLANA_DEVNET_ASSURANCE_PREVIEW=true python3 web/server.py 8000
+# with the Solana Devnet Preview tab (off by default; both exact values required)
+REDDI_ENABLE_SOLANA_DEVNET_ASSURANCE_PREVIEW=true \
+  REDDI_SOLANA_DEVNET_ASSURANCE_DEPLOYMENT_CONTEXT=local python3 web/server.py 8000
 ```
 
 | Route | What it is |
@@ -60,8 +61,10 @@ Five tabs: **The Arena** (weigh in, draft, fight, coached replay), **Power-Up
 Market** (specialists for hire), **Leaderboard**, **Build a Power-Up** (the ADL
 shape for sellers), **On-Chain** (the Solana projection). A sixth, **Devnet
 Preview** (local RAP Assurance receipt and tamper/replay fixtures), appears only
-when `REDDI_ENABLE_SOLANA_DEVNET_ASSURANCE_PREVIEW` is set — boundaries and the
-exact accepted values are in `docs/DEVNET-PREVIEW-RAP-ASSURANCE.md`.
+when `REDDI_ENABLE_SOLANA_DEVNET_ASSURANCE_PREVIEW` **and** the deployment
+context `REDDI_SOLANA_DEVNET_ASSURANCE_DEPLOYMENT_CONTEXT` are both set to exact
+values — boundaries and the accepted values are in
+`docs/DEVNET-PREVIEW-RAP-ASSURANCE.md`.
 
 ## Tests
 

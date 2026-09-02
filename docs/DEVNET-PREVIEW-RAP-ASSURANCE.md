@@ -1,12 +1,16 @@
 # Solana Devnet Preview — RAP Assurance
 
-This is the earliest safe Arena experience for demonstrating RAP Assurance without
-external deployment. It is a preview in `/play` and `/api/assurance`, **off unless
-`REDDI_ENABLE_SOLANA_DEVNET_ASSURANCE_PREVIEW` is set to `true` or `1`** — see
+This is the earliest safe Arena experience for demonstrating RAP Assurance. This
+change deploys nothing. It is a preview in `/play` and `/api/assurance`, **off
+unless an operator sets both halves of the gate: the enable flag
+`REDDI_ENABLE_SOLANA_DEVNET_ASSURANCE_PREVIEW` to `true` or `1`, and the
+deployment context `REDDI_SOLANA_DEVNET_ASSURANCE_DEPLOYMENT_CONTEXT` to `local`
+or `hosted`** — see
 [what is simulated, read-only, blocked, or approval-gated](#what-is-simulated-read-only-blocked-or-approval-gated).
 
 ```bash
-REDDI_ENABLE_SOLANA_DEVNET_ASSURANCE_PREVIEW=true python3 web/server.py 8000
+REDDI_ENABLE_SOLANA_DEVNET_ASSURANCE_PREVIEW=true \
+  REDDI_SOLANA_DEVNET_ASSURANCE_DEPLOYMENT_CONTEXT=local python3 web/server.py 8000
 ```
 
 ## What the preview proves
@@ -137,15 +141,32 @@ never claims index `0`.
 |---|---|
 | Simulated | Arena turns, AUDD payment observation fixture, receipt fixture, settlement decision |
 | Read-only | Devnet program IDs and local PDA derivation metadata already in `core/chain.py` |
-| Blocked | mainnet, live value, wallets, secrets, signing, custody, RPC, transaction submission, external deployment, official-mint observation, grant evidence |
-| Separately approval-gated | Any real Solana devnet write, live payment, wallet/RPC scope, spend cap, or externally hosted launch |
+| Blocked | mainnet, live value, wallets, secrets, signing, custody, RPC, transaction submission, official-mint observation, grant evidence |
+| Separately approval-gated | Any real Solana devnet write, live payment, wallet/RPC scope, spend cap, or externally hosted launch (declaring the `hosted` context) |
 
-"Blocked: external deployment" is enforced twice over. This change ships no
-deployment at all, and the preview is additionally gated at runtime by
-`REDDI_ENABLE_SOLANA_DEVNET_ASSURANCE_PREVIEW` — **off in every environment**
-unless an operator sets it to the exact value `true` or `1`. Absent, `false`,
-and malformed values (`True`, `yes`, `on`, `" true"`) all leave it off, so a
-typo can only fail closed. With the flag off:
+This change performs no deployment — `boundary.deploymentPerformedByRequest` is
+the only deployment claim the code makes about itself, because whether the
+process answering a request is externally hosted is something only the operator
+knows. That is why exposure needs **both** halves of the gate:
+
+| Variable | Accepted values | Effect |
+|---|---|---|
+| `REDDI_ENABLE_SOLANA_DEVNET_ASSURANCE_PREVIEW` | exactly `true` or `1` | opts in |
+| `REDDI_SOLANA_DEVNET_ASSURANCE_DEPLOYMENT_CONTEXT` | exactly `off`, `local`, `hosted` | declares where it runs |
+
+The preview is served only when the flag is an exact opt-in value **and** the
+context is exactly `local` or `hosted`. Absent, `off`, `false`, malformed
+(`True`, `yes`, `on`, `" true"`, `Local`, `prod`), and inconsistent
+combinations — including the flag set with no context declared — all leave it
+off, so a typo or a half-configured deploy can only fail closed. Nothing in
+this repository sets either variable, and nothing here sets `hosted`.
+
+The context is also the only truthful source of the `externalDeployment`
+boundary flag: `local` derives `false`, `hosted` derives `true`, and with no
+declared context the flag is omitted from the response rather than asserted.
+The preview never claims to be un-hosted on a host it cannot observe.
+
+With the preview off:
 
 - `/play` is served with the Devnet Preview tab, its panel, and its client code
   removed from the document — absent from the DOM, not hidden with CSS.
@@ -154,13 +175,15 @@ typo can only fail closed. With the flag off:
   is parsed and before any fixture is read.
 
 So an ordinary redeploy of this tree — including the operator's existing Railway
-service (`docs/OPERATIONS.md` owns the variable and the deploy steps) — does not
-expose the preview. Enabling it is a separate, operator-approved action with its
-own reviewed messaging: the "externally hosted launch" that stays separately
-approval-gated. Every other boundary in the table above still holds when the
-flag is on — the preview remains fixture-only, with no wallet, RPC, signing,
-submission, or custody path — so enabling it exposes the preview, never live
-value.
+service (`docs/OPERATIONS.md` owns both variables and the deploy steps) — does
+not expose the preview: neither the image nor the service definition sets
+either variable. Enabling it is a separate, operator-approved action with its
+own reviewed messaging, and selecting `hosted` needs that approval explicitly,
+because enabling the preview on an externally hosted service exposes it
+publicly — the "externally hosted launch" that stays separately approval-gated.
+Every other boundary in the table above still holds when the preview is on — it
+remains fixture-only, with no wallet, RPC, signing, submission, or custody path
+— so enabling it exposes the preview, never live value.
 
 ## Contribution path
 

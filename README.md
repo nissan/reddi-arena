@@ -93,9 +93,10 @@ local Solana Devnet Preview RAP Assurance receipt with tamper/replay fixtures,
 and climb a leaderboard — with every match deterministic and every fighter
 validated against the canonical ADL v0.2 schema. Prizes are arena credits on the
 `x402-dry-run` rail; no real value moves. The RAP Assurance preview is local
-fixture evidence only, and it is off unless
-`REDDI_ENABLE_SOLANA_DEVNET_ASSURANCE_PREVIEW=true` is set — see
-`docs/DEVNET-PREVIEW-RAP-ASSURANCE.md`.
+fixture evidence only, and it is off unless an operator sets both
+`REDDI_ENABLE_SOLANA_DEVNET_ASSURANCE_PREVIEW=true` and the deployment context
+`REDDI_SOLANA_DEVNET_ASSURANCE_DEPLOYMENT_CONTEXT=local` (or `hosted`, which is
+separately approval-gated) — see `docs/DEVNET-PREVIEW-RAP-ASSURANCE.md`.
 
 ## Current recommendation — read this first
 

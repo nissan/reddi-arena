@@ -138,7 +138,11 @@ CANONICAL_REFS = {
 BOUNDARY_FLAGS = {
     "cluster": "solana-devnet",
     "previewOnly": True,
-    "externalDeployment": False,
+    # What this code can actually prove about itself: building a preview
+    # performs no deployment. Whether the process answering the request is
+    # externally hosted is an operator declaration, not something this module
+    # can observe, so it is never asserted here.
+    "deploymentPerformedByRequest": False,
     "rpcCall": False,
     "walletSigning": False,
     "transactionSubmitted": False,
@@ -324,10 +328,24 @@ class ReplayStore:
         return True
 
 
-def scenario_catalog() -> dict:
+def boundary_flags(external_deployment: bool | None = None) -> dict:
+    """Boundary flags for a preview response.
+
+    `externalDeployment` is derived from the caller's explicit operator-declared
+    deployment context — False for a local declaration, True for a hosted one —
+    and is omitted entirely when the context is unknown, because "not externally
+    deployed" is not something this module may infer.
+    """
+    flags = dict(BOUNDARY_FLAGS)
+    if external_deployment is not None:
+        flags["externalDeployment"] = bool(external_deployment)
+    return flags
+
+
+def scenario_catalog(external_deployment: bool | None = None) -> dict:
     return {
         "previewFormat": PREVIEW_FORMAT_VERSION,
-        "boundary": dict(BOUNDARY_FLAGS),
+        "boundary": boundary_flags(external_deployment),
         "canonicalRefs": dict(CANONICAL_REFS),
         "scenarios": [
             {"id": key, **value} for key, value in SCENARIOS.items()
@@ -1294,6 +1312,7 @@ def build_assurance_preview(
     hire_b: dict | None = None,
     entered_a: str | None = None,
     entered_b: str | None = None,
+    external_deployment: bool | None = None,
 ) -> dict:
     if scenario not in SCENARIOS:
         raise ValueError(f"unknown RAP Assurance preview scenario {scenario!r}")
@@ -1348,12 +1367,12 @@ def build_assurance_preview(
     return {
         "previewFormat": PREVIEW_FORMAT_VERSION,
         # Stays truthful whether the preview is served locally or, once an
-        # operator sets REDDI_ENABLE_SOLANA_DEVNET_ASSURANCE_PREVIEW, from a
-        # hosted deploy: the fixture claim holds in both, "not externally
-        # deployed" would not.
+        # operator both enables it and declares a hosted context, from a hosted
+        # deploy: the fixture claim holds in both. Whether the deploy is
+        # external is carried by the derived boundary flag, never assumed here.
         "label": "Solana Devnet Preview — deterministic fixture, no live value",
         "scenario": {"id": scenario, **SCENARIOS[scenario]},
-        "boundary": dict(BOUNDARY_FLAGS),
+        "boundary": boundary_flags(external_deployment),
         "canonicalRefs": dict(CANONICAL_REFS),
         "devnetMetadata": {
             "programs": dict(chain.DEVNET_PROGRAMS),

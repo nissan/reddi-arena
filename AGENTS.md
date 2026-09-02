@@ -62,7 +62,7 @@ the engineering loop runs *inside* the node:
 ```bash
 pip install pyyaml jsonschema solders --break-system-packages
 
-python3 tests/test_arena.py            # 420 checks — must pass before any PR
+python3 tests/test_arena.py            # 464 checks — must pass before any PR
 python3 tools/validate_adl.py          # schema gate against pinned v0.2
 python3 tools/simulate.py --seeds 200  # balance sweep; regen BALANCE-REPORT if engine changed
 python3 tools/graph_lint.py            # graph invariants G1-G7 + READY frontier
@@ -84,9 +84,13 @@ python3 cli/arena.py --help
   FINDINGS register (T-093 enforces completeness) — never batch them (GE03).
 - **Provisional price.** Specialist price is `x-arena.price` pending ADL v0.3
   (finding F-007). Only `core.arena.advertised_price` may read it.
-- **RAP Assurance preview.** Keep `core/assurance.py` local fixture-only: no RPC,
-  wallet, signing, custody, external deployment, official-mint observation, or
-  grant evidence; canonical RAP/ADL semantics stay in upstream repos.
+- **RAP Assurance preview.** Keep `core/assurance.py` fixture-only: no RPC,
+  wallet, signing, custody, official-mint observation, or grant evidence; and
+  it performs no deployment. Whether the process serving it is externally
+  hosted is an operator declaration
+  (`REDDI_SOLANA_DEVNET_ASSURANCE_DEPLOYMENT_CONTEXT`, default off, `hosted`
+  needs separate approval) — never assumed by this code. Canonical RAP/ADL
+  semantics stay in upstream repos.
 - **Automation pause.** No new `*_packet` / `*_gate` / `*_handoff` /
   `*_signoff` scripts (lab direction reset, 2026-07-26). Issues F1/F2 are
   struck for this reason — do not resurrect them.

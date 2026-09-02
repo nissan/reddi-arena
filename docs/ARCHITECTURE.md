@@ -97,7 +97,11 @@ one-line change.
   builder. Every payload carries a `not-submitted` marker.
 - `core/assurance.py` uses deterministic parsed-payment fixtures and read-only
   devnet metadata only; its boundary flags keep RPC, wallets, signing, custody,
-  official-mint observation, grant evidence, and external deployment false.
+  official-mint observation, and grant evidence false, and state that building
+  a preview performs no deployment. `externalDeployment` is derived from the
+  operator-declared deployment context (`local` → false, `hosted` → true) and
+  is omitted when no context is declared, so the preview never claims to be
+  un-hosted on a host it cannot observe.
 - `audd_purse_plan()` hard-codes `paymentMode: "dry-run"` with no parameter to
   change it.
 - Match traces, ADL documents, and player metadata are explicitly listed as

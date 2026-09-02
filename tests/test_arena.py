@@ -1661,6 +1661,22 @@ check("assurance catalog is explicitly local Solana Devnet Preview",
       and _catalog["boundary"]["transactionSubmitted"] is False
       and _catalog["boundary"]["walletSigning"] is False
       and _catalog["boundary"]["officialMintObservation"] is False)
+# The boundary only asserts what the code can prove about itself. Building a
+# preview deploys nothing; whether the process is externally hosted is an
+# operator declaration, so with no declared context the claim is absent rather
+# than asserted false.
+check("boundary asserts no deployment by this request and never guesses hosting",
+      _catalog["boundary"]["deploymentPerformedByRequest"] is False
+      and "externalDeployment" not in _catalog["boundary"]
+      and "externalDeployment" not in assurance.boundary_flags()
+      and "externalDeployment" not in
+      assurance.build_assurance_preview(DEF, RAID, seed=2)["boundary"])
+check("a declared context is the only source of the externalDeployment claim",
+      assurance.boundary_flags(False)["externalDeployment"] is False
+      and assurance.boundary_flags(True)["externalDeployment"] is True
+      and assurance.scenario_catalog(True)["boundary"]["externalDeployment"] is True
+      and assurance.build_assurance_preview(
+          DEF, RAID, seed=2, external_deployment=True)["boundary"]["externalDeployment"] is True)
 _assurance_cases = {
     "valid-receipt": ("accept", "release", []),
     "tampered-trace": ("reject", "blocked", ["rap_assurance.evidence.trace_tampered"]),
@@ -2206,9 +2222,11 @@ import json as _wjson
 
 _os.environ["DATA_DIR"] = _tempfile.mkdtemp(prefix="arena-waitlist-test-")
 _os.environ["ARENA_ADMIN_TOKEN"] = "test-token-123"
-# The Devnet Preview is off unless explicitly opted in, so this instance is the
-# "explicitly enabled" server; the default-off instance is loaded further down.
+# The Devnet Preview is off unless explicitly opted in on BOTH halves of the
+# gate, so this instance is the "explicitly enabled, locally declared" server;
+# the default-off instance is loaded further down.
 _os.environ["REDDI_ENABLE_SOLANA_DEVNET_ASSURANCE_PREVIEW"] = "true"
+_os.environ["REDDI_SOLANA_DEVNET_ASSURANCE_DEPLOYMENT_CONTEXT"] = "local"
 _spec = _ilu.spec_from_file_location("arena_server", ROOT / "web" / "server.py")
 _srv = _ilu.module_from_spec(_spec)
 _spec.loader.exec_module(_srv)
@@ -2300,38 +2318,76 @@ check("a corrupt preview fixture is a sanitized 500, not a client-blaming 400",
       and str(_bad_path_api) not in _b["error"]
       and assurance.AUDD_OFFICIAL_SOLANA_MAINNET_MINT not in _b["error"])
 
-print("Devnet Preview exposure flag (default off)")
+print("Devnet Preview exposure gate (flag + deployment context, default off)")
 # The preview is fixture-only and reaches no wallet/RPC/signing/custody path,
 # but hosting it publicly is separately approval-gated
-# (docs/DEVNET-PREVIEW-RAP-ASSURANCE.md). The server therefore gates it behind
-# REDDI_ENABLE_SOLANA_DEVNET_ASSURANCE_PREVIEW and fails closed on anything but
-# an exact documented opt-in value, so a typo can never expose it.
+# (docs/DEVNET-PREVIEW-RAP-ASSURANCE.md). The server therefore needs BOTH an
+# exact REDDI_ENABLE_SOLANA_DEVNET_ASSURANCE_PREVIEW opt-in value AND an exact
+# operator-declared deployment context, and fails closed on anything else, so
+# neither a typo nor an undeclared environment can expose it.
+_FLAG, _CTX = _srv.ASSURANCE_PREVIEW_FLAG, _srv.ASSURANCE_CONTEXT_VAR
 check("only the exact documented values enable the preview",
       all(_srv.preview_enabled(_v) for _v in ("true", "1"))
       and not any(_srv.preview_enabled(_v) for _v in
                   (None, "", "True", "TRUE", "yes", "on", "enabled", "y",
                    " true", "true ", "0", "false", "False", "2", 1, True)))
-check("the enabled instance serves the preview UI and API",
-      _srv.ASSURANCE_PREVIEW_ENABLED
-      and 'data-panel="assurance"' in _srv.arena_page_bytes().decode())
+check("the deployment context is a closed set; anything else reads as off",
+      [_srv.deployment_context(_v) for _v in ("off", "local", "hosted")]
+      == ["off", "local", "hosted"]
+      and all(_srv.deployment_context(_v) == "off" for _v in
+              (None, "", "Local", "LOCAL", " local", "local ", "hosted-preview",
+               "prod", "on", True, 1)))
+# Full flag x context matrix: exposure needs both halves, and externalDeployment
+# is derived from the context, never inferred when the context is unknown.
+_gate_matrix = [
+    (None, None, False, None), (None, "local", False, None),
+    (None, "hosted", False, None), ("true", None, False, None),
+    ("1", None, False, None), ("true", "off", False, None),
+    ("true", "", False, None), ("true", "Local", False, None),
+    ("true", "LOCAL", False, None), ("true", "hosted-preview", False, None),
+    ("false", "local", False, None), ("True", "local", False, None),
+    ("yes", "hosted", False, None), ("", "local", False, None),
+    ("0", "hosted", False, None), ("true", "local", True, False),
+    ("1", "local", True, False), ("true", "hosted", True, True),
+    ("1", "hosted", True, True),
+]
+check("exposure needs an exact flag AND an exact context, and derives external deployment",
+      all(_srv.preview_exposure(_f, _c) == (_on, _ext)
+          for _f, _c, _on, _ext in _gate_matrix))
 
-# A second server module loaded with the flag ABSENT is the default every
-# environment gets, including an ordinary Railway redeploy of this tree.
-_preview_env = _os.environ.pop("REDDI_ENABLE_SOLANA_DEVNET_ASSURANCE_PREVIEW")
-_os.environ["DATA_DIR"] = _tempfile.mkdtemp(prefix="arena-preview-off-test-")
-_spec_off = _ilu.spec_from_file_location("arena_server_preview_off",
-                                         ROOT / "web" / "server.py")
-_srv_off = _ilu.module_from_spec(_spec_off)
-_spec_off.loader.exec_module(_srv_off)
-_os.environ["REDDI_ENABLE_SOLANA_DEVNET_ASSURANCE_PREVIEW"] = _preview_env
-_httpd_off = _TServer(("127.0.0.1", 0), _srv_off.Handler)
-_port_off = _httpd_off.server_address[1]
-_threading.Thread(target=_httpd_off.serve_forever, daemon=True).start()
+
+def _load_server(flag, context, label):
+    """A fresh server module loaded under one exact flag/context environment."""
+    _prior = {_k: _os.environ.get(_k) for _k in (_FLAG, _CTX, "DATA_DIR")}
+    _os.environ["DATA_DIR"] = _tempfile.mkdtemp(prefix=f"arena-{label}-test-")
+    for _k, _v in ((_FLAG, flag), (_CTX, context)):
+        if _v is None:
+            _os.environ.pop(_k, None)
+        else:
+            _os.environ[_k] = _v
+    try:
+        _sp = _ilu.spec_from_file_location("arena_server_" + label,
+                                           ROOT / "web" / "server.py")
+        _mod = _ilu.module_from_spec(_sp)
+        _sp.loader.exec_module(_mod)
+    finally:
+        for _k, _v in _prior.items():
+            if _v is None:
+                _os.environ.pop(_k, None)
+            else:
+                _os.environ[_k] = _v
+    return _mod
 
 
-def _req_off(method, path, raw=None):
-    """Raw request against the default-off server: returns (status, body bytes)."""
-    r = _urequest.Request(f"http://127.0.0.1:{_port_off}{path}", method=method, data=raw)
+def _serve(mod):
+    _h = _TServer(("127.0.0.1", 0), mod.Handler)
+    _threading.Thread(target=_h.serve_forever, daemon=True).start()
+    return _h.server_address[1]
+
+
+def _call(port, method, path, raw=None):
+    """Raw request against a given server: returns (status, body bytes)."""
+    r = _urequest.Request(f"http://127.0.0.1:{port}{path}", method=method, data=raw)
     if raw is not None:
         r.add_header("Content-Type", "application/json")
     try:
@@ -2339,6 +2395,73 @@ def _req_off(method, path, raw=None):
         return resp.status, resp.read()
     except _uerror.HTTPError as e:
         return e.code, e.read()
+
+
+_preview_body = _wjson.dumps({"botA": "antweight-vault-defender.adl.yaml",
+                              "botB": "antweight-vault-raider.adl.yaml",
+                              "scenario": "valid-receipt"}).encode()
+# Every non-exposing environment answers exactly like the default-off one, so a
+# half-configured deploy is indistinguishable from an unknown path.
+for _label, _flag_v, _ctx_v in (("ctx-missing", "true", None),
+                                ("ctx-malformed", "true", "Local"),
+                                ("ctx-off", "1", "off"),
+                                ("flag-off-ctx-local", None, "local"),
+                                ("flag-off-ctx-hosted", "false", "hosted")):
+    _m = _load_server(_flag_v, _ctx_v, _label)
+    _p = _serve(_m)
+    _pg = _call(_p, "GET", "/play")[1].decode()
+    check(f"gate {_label}: no preview UI, no preview API, no externalDeployment claim",
+          not _m.ASSURANCE_PREVIEW_ENABLED
+          and _m.ASSURANCE_EXTERNAL_DEPLOYMENT is None
+          and 'data-panel="assurance"' not in _pg and "Devnet Preview" not in _pg
+          and _call(_p, "GET", "/api/assurance/scenarios")[0] == 404
+          and _call(_p, "POST", "/api/assurance", _preview_body)[0] == 404)
+
+# The two exposing environments differ only in the truth they may assert about
+# where they are running. Every other disclosure survives enablement.
+_srv_hosted = _load_server("true", "hosted", "ctx-hosted")
+_port_hosted = _serve(_srv_hosted)
+for _mod, _port, _name, _external in ((_srv, _port, "local", False),
+                                      (_srv_hosted, _port_hosted, "hosted", True)):
+    _cat = _wjson.loads(_call(_port, "GET", "/api/assurance/scenarios")[1])
+    _bun = _wjson.loads(_call(_port, "POST", "/api/assurance", _preview_body)[1])
+    check(f"gate {_name}-enabled: preview served, externalDeployment is {_external}",
+          _mod.ASSURANCE_PREVIEW_ENABLED
+          and _mod.ASSURANCE_EXTERNAL_DEPLOYMENT is _external
+          and 'data-panel="assurance"' in _mod.arena_page_bytes().decode()
+          and _cat["boundary"]["externalDeployment"] is _external
+          and _bun["boundary"]["externalDeployment"] is _external)
+    check(f"gate {_name}-enabled: every other preview disclosure still holds",
+          all(_bun["boundary"][_f] is False for _f in
+              ("deploymentPerformedByRequest", "rpcCall", "walletSigning",
+               "transactionSubmitted", "liveValue", "custody",
+               "officialMintObservation", "grantEvidence"))
+          and _bun["boundary"]["previewOnly"] is True
+          and _bun["boundary"]["cluster"] == "solana-devnet"
+          and "Devnet Preview" in _bun["label"])
+# Nothing in this repo declares a hosted context: enabling the preview on a
+# hosted service is a separate operator action, so the default remains "off".
+check("no repo-shipped configuration declares the hosted context",
+      _srv.deployment_context(None) == "off"
+      and _load_server(None, None, "ctx-default").ASSURANCE_DEPLOYMENT_CONTEXT == "off")
+# A top-level array, scalar, string or null is caller error on every POST route:
+# one stable 400 before any field is read, never a dropped connection.
+for _path in ("/api/assurance", "/api/fight", "/api/draft", "/api/waitlist",
+              "/api/chain"):
+    for _raw in (b"[]", b"5", b'"x"', b"null", b"true", b'[{"botA":"x"}]'):
+        _s_nb, _b_nb = _call(_port, "POST", _path, _raw)
+        check(f"non-object body {_raw!r} to {_path} is a stable 400",
+              _s_nb == 400 and "error" in _wjson.loads(_b_nb))
+
+# A second server module loaded with the flag ABSENT is the default every
+# environment gets, including an ordinary Railway redeploy of this tree.
+_srv_off = _load_server(None, None, "preview-off")
+_port_off = _serve(_srv_off)
+
+
+def _req_off(method, path, raw=None):
+    """Raw request against the default-off server: returns (status, body bytes)."""
+    return _call(_port_off, method, path, raw)
 
 
 check("default off: the flag is absent, so the preview is disabled",
@@ -2395,20 +2518,85 @@ for _frag in ("<!-- devnet-preview:begin -->x", "x<!-- devnet-preview:end -->",
         _unpaired += 1
 check("an unpaired preview marker raises instead of serving a broken page",
       _unpaired == 4)
-# Deploy config: nothing in the image or the Railway service definition sets the
-# flag, so an ordinary redeploy of this tree keeps the preview off. The image
-# does ship the fixtures the preview needs once an operator opts in.
-_railway_cfg = (ROOT / "railway.json").read_text()
-_dockerfile = (ROOT / "Dockerfile").read_text()
-_dockerignore = (ROOT / ".dockerignore").read_text()
-check("an ordinary Railway redeploy does not set the preview flag",
-      "REDDI_ENABLE_SOLANA_DEVNET_ASSURANCE_PREVIEW" not in _railway_cfg
-      and not _re.search(r"^\s*(ENV|ARG)\s+REDDI_ENABLE_SOLANA_DEVNET_ASSURANCE_PREVIEW",
-                         _dockerfile, _re.M))
-check("the image ships the assurance fixtures the preview needs when enabled",
-      "COPY fixtures/assurance/" in _dockerfile
-      and "!fixtures/assurance" in _dockerignore
-      and "\nfixtures/\n" not in _dockerignore)
+# Deploy config: neither half of the gate is configured by the image or the
+# Railway service definition, so an ordinary redeploy of this tree keeps the
+# preview off. The image does ship the fixtures the preview needs once an
+# operator opts in. Both are checked against a normalized model of what the
+# builder actually does with these files, not against their text — an
+# equivalent rewrite of either file must keep these checks green.
+import fnmatch as _fnmatch
+
+_railway = _wjson.loads((ROOT / "railway.json").read_text())
+_railway_vars = dict(_railway.get("variables") or {})
+for _sect in ("build", "deploy"):
+    _railway_vars.update((_railway.get(_sect) or {}).get("variables") or {})
+
+
+def _dockerfile_instructions(text):
+    """Dockerfile as (INSTRUCTION, argument) pairs, continuations joined."""
+    _out, _buf = [], ""
+    for _line in text.splitlines():
+        _s = _line.strip()
+        if not _s or _s.startswith("#"):
+            continue
+        if _s.endswith("\\"):
+            _buf += _s[:-1].strip() + " "
+            continue
+        _s, _buf = (_buf + _s).strip(), ""
+        _instr, _, _arg = _s.partition(" ")
+        _out.append((_instr.upper(), _arg.strip()))
+    return _out
+
+
+def _pattern_matches(pattern, path):
+    """One .dockerignore pattern against a path: segment-wise, a directory
+    pattern matching every path beneath it, and `*` never crossing a `/`."""
+    _pp, _tp = pattern.split("/"), path.split("/")
+    return (len(_pp) <= len(_tp)
+            and all(_fnmatch.fnmatch(_t, _p) for _p, _t in zip(_pp, _tp)))
+
+
+def _ignored(patterns, path):
+    """Docker's .dockerignore semantics: last matching pattern wins, ! re-includes."""
+    _excluded = False
+    for _raw in patterns:
+        _pat = _raw.strip()
+        if not _pat or _pat.startswith("#"):
+            continue
+        _negate = _pat.startswith("!")
+        _pat = _pat.lstrip("!").strip().rstrip("/")
+        if _pat and _pattern_matches(_pat, path):
+            _excluded = not _negate
+    return _excluded
+
+
+def _in_build_context(instructions, patterns, path):
+    """True when `path` is copied into the image and not ignored out of it."""
+    _copied = any(path == _src or path.startswith(_src.rstrip("/") + "/")
+                  for _instr, _arg in instructions if _instr == "COPY"
+                  for _src in _arg.split()[:1])
+    return _copied and not _ignored(patterns, path)
+
+
+_instructions = _dockerfile_instructions((ROOT / "Dockerfile").read_text())
+_ignore_patterns = (ROOT / ".dockerignore").read_text().splitlines()
+_baked_env = {_arg.replace("=", " ").split()[0]
+              for _instr, _arg in _instructions if _instr in ("ENV", "ARG") and _arg}
+check("an ordinary Railway redeploy configures neither gate variable",
+      _srv.ASSURANCE_PREVIEW_FLAG not in _railway_vars
+      and _srv.ASSURANCE_CONTEXT_VAR not in _railway_vars
+      and _srv.ASSURANCE_PREVIEW_FLAG not in _baked_env
+      and _srv.ASSURANCE_CONTEXT_VAR not in _baked_env)
+_fixture_rel = str(assurance.FIXTURE_PATH.relative_to(ROOT))
+check("the image build context includes the assurance fixtures the preview needs",
+      assurance.FIXTURE_PATH.exists()
+      and _in_build_context(_instructions, _ignore_patterns, _fixture_rel))
+# The ignore model is only evidence if it can say no: the excluded trees the
+# image deliberately drops must still resolve as excluded.
+check("the build-context model still excludes what the image drops",
+      not any(_in_build_context(_instructions, _ignore_patterns, _p)
+              for _p in ("tests/test_arena.py", "docs/OPERATIONS.md",
+                         "core/waitlist.json", "fixtures/other/thing.json")))
 
 _s, _b = _req("POST", "/api/waitlist", {"email": "Player@Example.com", "roles": ["compete"]})
 check("waitlist signup works and normalizes case", _s == 200 and _b["ok"] and _b["position"] == 1)
