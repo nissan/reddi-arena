@@ -1696,6 +1696,61 @@ finally:
 check("a contributed fixture carrying the official AUDD mainnet mint is refused",
       _fixture_refused)
 
+# Every fixture defect is a server-side integrity failure, so it must reach the
+# sanitized-500 handler rather than JSONDecodeError/KeyError/ValueError escaping
+# as a caller error or an unhandled traceback.
+def _fixture_load_outcome(text):
+    with _tmp_ass.NamedTemporaryFile("w", suffix=".json", delete=False) as _f:
+        _f.write(text)
+        _path = Path(_f.name)
+    try:
+        assurance.FIXTURE_PATH = _path
+        try:
+            assurance.load_payment_fixture()
+            return "loaded"
+        except assurance.AssuranceIntegrityError:
+            return "integrity"
+        except Exception as exc:
+            return type(exc).__name__
+    finally:
+        assurance.FIXTURE_PATH = _real_fixture_path
+        _path.unlink()
+
+_good_fixture_text = _real_fixture_path.read_text()
+_broken_fixtures = {
+    "truncated json": "",
+    "json array not object": "[]",
+    "missing expected": _json_ass.dumps(
+        {k: v for k, v in _json_ass.loads(_good_fixture_text).items() if k != "expected"}),
+    "missing fixtureId": _json_ass.dumps(
+        {k: v for k, v in _json_ass.loads(_good_fixture_text).items() if k != "fixtureId"}),
+    "non-numeric amount": _good_fixture_text.replace('"amountBaseUnits": "2500000"',
+                                                     '"amountBaseUnits": "abc"', 1),
+    "wrong-typed expected": _good_fixture_text.replace('"expected": {', '"expected": [{', 1)[:-1],
+}
+for _label, _text in _broken_fixtures.items():
+    check(f"a {_label} fixture is a server integrity failure, not a caller error",
+          _fixture_load_outcome(_text) == "integrity")
+assurance.FIXTURE_PATH = _real_fixture_path
+
+# _owner_status can refuse on four dimensions; the reported `expected` value
+# must name the dimension that actually failed, not always the payee.
+_owner_cases = {
+    "wrong_mint": ("mint", ("meta", "postTokenBalances", 0, "mint")),
+    "wrong_token_program": ("tokenProgram", ("meta", "postTokenBalances", 0, "programId")),
+    "wrong_payee": ("payTo", ("meta", "postTokenBalances", 0, "owner")),
+}
+for _reason, (_expected_key, _path) in _owner_cases.items():
+    _f = _json_ass.loads(_good_fixture_text)
+    _node = _f["parsedTransaction"]
+    for _part in _path[:-1]:
+        _node = _node[_part]
+    _node[_path[-1]] = "MismatchedValue1111111111111111111111111111"
+    _res = assurance.verify_spl_transfer_checked_fixture(_f["parsedTransaction"], _f["expected"])
+    check(f"an owner-status {_reason} refusal reports the expected {_expected_key}",
+          _res["ok"] is False and _res["reason"] == _reason
+          and _res["expected"] == _f["expected"][_expected_key])
+
 # reddi.policy-decision.v1 reasonCodes are a closed upstream set
 # (packages/agent-protocol/src/policy.ts); an Arena-minted code is a malformed
 # receipt to any canonical validator.
@@ -1730,10 +1785,23 @@ for _case in ("wrong-mint", "wrong-payee"):
     check(f"{_case} claims no payment proof and no moved amount",
           _pay["paymentProofRef"] is None and _pay["amount"] is None
           and "incomplete receipt candidate" in _pay["proofBoundary"])
+    check(f"{_case} paymentEvidence stays observation-only, not a restated quote",
+          _b["receipt"]["paymentEvidence"]["payee"] is None
+          and _b["receipt"]["paymentEvidence"]["amount"] is None
+          and "rap_receipt.payment.invalid" in _seen)
+    check(f"{_case} keeps the quoted terms in Arena-owned metadata instead",
+          _b["receipt"]["metadata"]["expectedPaymentTerms"]["amountBaseUnits"]
+          == assurance.load_payment_fixture()["expected"]["amountBaseUnits"])
     check(f"{_case} is not accused of a payee mismatch that never happened",
           "rap_receipt.settlement.payee_mismatch" not in _seen)
     check(f"{_case} labels the emitted JSON an invalid candidate, not a receipt",
           _b["receiptArtifact"]["kind"] == "invalid-candidate")
+_valid_observation = _valid["adapters"]["paymentObservation"]["result"]["observation"]
+check("an observed receipt binds paymentEvidence to the observed payee and amount",
+      _valid["receipt"]["paymentEvidence"]["payee"]
+      == _valid_observation["destinationOwner"]
+      and _valid["receipt"]["paymentEvidence"]["amount"]
+      == int(_valid_observation["amountBaseUnits"]))
 check("an accepted scenario is labelled a receipt and a denied one is not emitted",
       _valid["receiptArtifact"]["kind"] == "receipt"
       and assurance.build_assurance_preview(
@@ -1775,7 +1843,7 @@ _inner_receipt = assurance._build_receipt(
 check("an inner-instruction receipt's idempotency key carries 1.0, never 0",
       _inner_receipt["replayIdempotency"]["idempotencyKey"].startswith(_inner["replayKey"] + ":")
       and ":0:" not in _inner_receipt["replayIdempotency"]["idempotencyKey"])
-_valid_obs, _ = assurance._payment_for_scenario("valid-receipt")
+_valid_obs = assurance._payment_for_scenario("valid-receipt")
 check("an observed receipt's idempotency key extends the verifier's replay key",
       _valid["receipt"]["replayIdempotency"]["idempotencyKey"]
       == f"{_valid_obs['replayKey']}:{_valid['receipt']['request']['requestId']}")
@@ -1809,6 +1877,22 @@ check("one preview request loads and validates the fixture exactly once",
 check("a fixture changed mid-request cannot alter the committed bundle",
       _once["receipt"] == _valid["receipt"]
       and "9999999" not in _json_ass.dumps(_once))
+
+# The structural ten-layer walk is computed once and shared with the artifact
+# classifier rather than recomputed per request.
+_real_layers = assurance._validate_receipt_layers
+_layer_passes = []
+def _counting_layers(receipt):
+    _layer_passes.append(1)
+    return _real_layers(receipt)
+try:
+    assurance._validate_receipt_layers = _counting_layers
+    _single = assurance.build_assurance_preview(DEF, RAID, scenario="wrong-mint", seed=2)
+finally:
+    assurance._validate_receipt_layers = _real_layers
+check("one preview request runs the structural layer pass exactly once",
+      len(_layer_passes) == 1
+      and _single["receiptArtifact"]["kind"] == "invalid-candidate")
 _dup = assurance.build_assurance_preview(DEF, RAID, scenario="duplicate-replay", seed=2)
 check("duplicate-replay keeps the first observation's real settlement and rejects on replay",
       _dup["receipt"]["settlementProgramProof"]["confirmationStatus"] == "confirmed"
@@ -1819,7 +1903,7 @@ check("duplicate-replay keeps the first observation's real settlement and reject
 
 # Missing-layer diagnostics are keyed by evidence category (with three
 # overrides), matching the canonical lab validator taxonomy consumers parse.
-_pay_ok, _ = assurance._payment_for_scenario("valid-receipt")
+_pay_ok = assurance._payment_for_scenario("valid-receipt")
 for _layer, _code in (("delegatedAuthority", "rap_receipt.authority.required"),
                       ("serviceOutcome", "rap_receipt.service_outcome.required"),
                       ("paymentEvidence", "rap_receipt.payment.required"),

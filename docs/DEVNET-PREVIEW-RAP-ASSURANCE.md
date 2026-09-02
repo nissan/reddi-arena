@@ -78,13 +78,28 @@ labels it with that classification:
 | `not-emitted` | Denied before payment; no candidate exists |
 
 When the payment observation does not verify, the artifact is an
-`invalid-candidate`. Its `settlementProgramProof` omits every observable field,
-its `payment.paymentProofRef` / `payment.amount` are null, and its
-`replayIdempotency.idempotencyKey` is absent rather than restating the expected
-transfer, so the canonical `rap_receipt.settlement.invalid` and
-`rap_receipt.replay.invalid` diagnostics report incomplete evidence. Semantic
-cross-checks never run on an incomplete layer, so the candidate is never
-accused of a mismatch against a field that was simply never observed.
+`invalid-candidate`. Every evidence field that would have to be *observed* is
+absent rather than restated from the expected terms: `settlementProgramProof`
+omits each observable field, `paymentEvidence.payee` / `.amount` and
+`payment.paymentProofRef` / `payment.amount` are null, and
+`replayIdempotency.idempotencyKey` is absent. The canonical
+`rap_receipt.payment.invalid`, `.settlement.invalid` and `.replay.invalid`
+diagnostics then report incomplete evidence, and that same structural pass is
+what classifies the artifact. Semantic cross-checks never run on an incomplete
+layer, so the candidate is never accused of a mismatch against a field that was
+simply never observed.
+
+The quoted terms the payment was *supposed* to satisfy are not evidence, so
+they live in Arena-owned `metadata.expectedPaymentTerms` (and in the canonical
+`policyDecision.quotedAmount` and `paymentEvidence.requiredHash` digest), never
+in `paymentEvidence` values or the settlement proof.
+
+A fixture that is unreadable, unparseable, or the wrong shape is a server-side
+defect, not caller error: `load_payment_fixture()` validates the file, its
+required top-level keys, its expected-terms keys, and the base-unit amount, and
+raises `AssuranceIntegrityError`, which `/api/assurance` answers with a
+sanitized 500 plus a bounded server-side log line. Only malformed client input
+(an unknown or non-string `scenario`) is a 400.
 
 When a payment *was* observed, `replayIdempotency.idempotencyKey` extends the
 verifier's own consume-once replay key — network, signature, and the exact

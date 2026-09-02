@@ -115,6 +115,11 @@ CANONICAL_OBSERVATION_FAILURE_REASONS = frozenset(
 # (packages/agent-protocol/src/payment-records.ts) so it stays comparable.
 ARENA_PREVIEW_LABELS_VERSION = "reddi.arena.devnet-preview-labels.v1"
 
+REQUIRED_FIXTURE_KEYS = ("fixtureId", "boundary", "expected", "parsedTransaction")
+REQUIRED_FIXTURE_EXPECTED_KEYS = (
+    "network", "signature", "mint", "tokenProgram", "payTo", "amountBaseUnits", "authority",
+)
+
 
 class AssuranceIntegrityError(ValueError):
     """A server-side fixture or canonicality defect, never caller input."""
@@ -343,7 +348,35 @@ def preview_labels() -> dict:
 
 
 def load_payment_fixture() -> dict:
-    fixture = json.loads(FIXTURE_PATH.read_text())
+    """Read and fully validate the preview fixture, or fail as a server defect.
+
+    Every builder downstream indexes this document directly, so a contributed
+    fixture that is unreadable, unparseable, or the wrong shape is a
+    server-side integrity failure — never a caller error.
+    """
+    try:
+        raw = FIXTURE_PATH.read_text()
+    except OSError as exc:
+        raise AssuranceIntegrityError(f"preview fixture is unreadable ({type(exc).__name__})") from exc
+    try:
+        fixture = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise AssuranceIntegrityError(
+            f"preview fixture is not valid JSON (line {exc.lineno} column {exc.colno})") from exc
+    if not isinstance(fixture, dict):
+        raise AssuranceIntegrityError("preview fixture must be a JSON object")
+    missing = [key for key in REQUIRED_FIXTURE_KEYS if not fixture.get(key)]
+    if missing:
+        raise AssuranceIntegrityError(f"preview fixture is missing required keys: {', '.join(missing)}")
+    if not isinstance(fixture["expected"], dict) or not isinstance(fixture["parsedTransaction"], dict):
+        raise AssuranceIntegrityError("preview fixture expected/parsedTransaction must be JSON objects")
+    missing = [key for key in REQUIRED_FIXTURE_EXPECTED_KEYS if not _string(fixture["expected"].get(key))]
+    if missing:
+        raise AssuranceIntegrityError(f"preview fixture expected terms are missing: {', '.join(missing)}")
+    amount = fixture["expected"]["amountBaseUnits"]
+    if not amount.isdigit() or amount.startswith("0"):
+        raise AssuranceIntegrityError(
+            "preview fixture expected.amountBaseUnits must be a positive integer base-unit string")
     if _official_mint_present(fixture):
         raise AssuranceIntegrityError(
             "Devnet preview fixtures must never carry the official AUDD mainnet mint; "
@@ -452,6 +485,14 @@ def _account_key_at(parsed: dict, index: Any) -> str | None:
     if not 0 <= index < len(keys):
         return None
     return _public_key(keys[index])
+
+
+OWNER_STATUS_EXPECTED_KEY = {
+    "wrong_payee": "payTo",
+    "wrong_mint": "mint",
+    "wrong_token_program": "tokenProgram",
+    "wrong_destination": "destinationTokenAccount",
+}
 
 
 def _owner_status(parsed: dict, token_account: str | None, expected: dict) -> dict:
@@ -565,10 +606,11 @@ def _candidate_failure(candidates: list[dict], expected: dict) -> dict:
     with_owner = [c for c in with_dest if c["ownerStatus"].get("ok")]
     if not with_owner:
         first = with_dest[0]["ownerStatus"] if with_dest else {"reason": "wrong_payee"}
+        reason = first.get("reason", "wrong_payee")
         return _payment_failure(
-            first.get("reason", "wrong_payee"),
+            reason,
             "destination token account is not owned by the expected payee for the expected mint/program",
-            expected["payTo"],
+            expected.get(OWNER_STATUS_EXPECTED_KEY.get(reason, "payTo")),
             first.get("actual"),
         )
     with_amount = [c for c in with_owner if c["amountBaseUnits"] == expected["amountBaseUnits"]]
@@ -863,6 +905,13 @@ def _build_receipt(
             "arenaCurrency": ARENA_CURRENCY,
             "paymentObservationGrantEligible": False,
             "fixtureBoundary": fixture["boundary"],
+            "expectedPaymentTerms": {
+                "boundary": "Arena-owned quoted terms; what was required, never evidence that it happened",
+                "network": expected["network"],
+                "mint": expected["mint"],
+                "payee": payee,
+                "amountBaseUnits": expected["amountBaseUnits"],
+            },
         },
         "request": request,
         "finalizedAt": FINALIZED_AT,
@@ -889,8 +938,8 @@ def _build_receipt(
             "responseHash": payment_response_hash,
             "rail": rail,
             "facilitatorRef": "fixture:x402-solana-read-only-observer",
-            "payee": payee,
-            "amount": amount,
+            "payee": observation.get("destinationOwner"),
+            "amount": int(observation["amountBaseUnits"]) if observation else None,
             "boundRequestId": request_id,
         },
         "settlementProgramProof": settlement,
@@ -1068,7 +1117,8 @@ def _validate_receipt_semantics(receipt: dict) -> list[dict]:
     return diagnostics
 
 
-def validate_assurance(receipt: dict | None, trace: dict, payment_result: dict, policy_allowed: bool = True) -> dict:
+def validate_assurance(receipt: dict | None, trace: dict, payment_result: dict, policy_allowed: bool = True,
+                       structural: list[dict] | None = None) -> dict:
     diagnostics: list[dict] = []
     if not policy_allowed:
         diagnostics.append(_diag("rap_receipt.authority.scope_mismatch", "Delegated authority denied this resource; no payment/work receipt may be accepted.", "authority", "policyDecision"))
@@ -1078,7 +1128,7 @@ def validate_assurance(receipt: dict | None, trace: dict, payment_result: dict, 
     if receipt is None:
         diagnostics.append(_diag("rap_receipt.envelope.required", "No RAP receipt was emitted for this denied/no-payment path.", "envelope", "receipt"))
     else:
-        diagnostics.extend(_validate_receipt_layers(receipt))
+        diagnostics.extend(structural if structural is not None else _validate_receipt_layers(receipt))
         diagnostics.extend(_validate_receipt_semantics(receipt))
         recomputed = _trace_hash(trace)
         if trace.get("traceHash") != recomputed:
@@ -1111,31 +1161,31 @@ def _scenario_fixture(scenario: str, fixture: dict) -> tuple[dict, dict | None]:
     return {"expected": expected, "parsedTransaction": parsed}, replay_store
 
 
-def _payment_for_scenario(scenario: str, fixture: dict | None = None) -> tuple[dict, dict | None]:
+def _payment_for_scenario(scenario: str, fixture: dict | None = None) -> dict:
     fixture = fixture if fixture is not None else load_payment_fixture()
     case, replay_store = _scenario_fixture(scenario, fixture)
     if scenario == "authorization-denied":
-        return _no_payment_attempt("authorization_denied", "policy denied before payment preparation; no payment observation exists"), None
+        return _no_payment_attempt("authorization_denied", "policy denied before payment preparation; no payment observation exists")
     if scenario == "duplicate-replay" and replay_store is not None:
         first = verify_spl_transfer_checked_fixture(case["parsedTransaction"], case["expected"], replay_store=replay_store)
         second = verify_spl_transfer_checked_fixture(case["parsedTransaction"], case["expected"], replay_store=replay_store)
         second["firstAttempt"] = first
-        return second, replay_store
-    return verify_spl_transfer_checked_fixture(case["parsedTransaction"], case["expected"]), replay_store
+        return second
+    return verify_spl_transfer_checked_fixture(case["parsedTransaction"], case["expected"])
 
 
-def _receipt_artifact(receipt: dict | None, decision: str) -> dict:
+def _receipt_artifact(receipt: dict | None, decision: str, structural: list[dict]) -> dict:
     """What the emitted JSON actually is, read off the document, not the verdict.
 
     A receipt whose payment was genuinely observed and whose evidence layers are
     canonically complete stays a receipt even when assurance refuses it: the
     refusal is semantic (eval failed, replay, tampered trace), not structural.
-    Only unobserved or canonically incomplete evidence is an invalid candidate.
+    An unobserved payment leaves its evidence layers incomplete, so the same
+    structural pass that reports it also classifies the artifact.
     """
     if receipt is None:
         return {"kind": "not-emitted", "label": "no receipt candidate (denied before payment)"}
-    observed = _get_path(receipt, "payment", "paymentProofRef") is not None
-    if not observed or _validate_receipt_layers(receipt):
+    if structural:
         return {"kind": "invalid-candidate", "label": "invalid RAP Assurance receipt candidate"}
     if decision == "accept":
         return {"kind": "receipt", "label": "RAP Assurance receipt"}
@@ -1178,7 +1228,7 @@ def build_assurance_preview(
         entered_b=entered_b,
     )
     fixture = load_payment_fixture()
-    payment_result, _ = _payment_for_scenario(scenario, fixture)
+    payment_result = _payment_for_scenario(scenario, fixture)
     policy_allowed = scenario != "authorization-denied"
     eval_status = "failed" if scenario == "refund-gate-failed" else "pass"
     duplicate = scenario == "duplicate-replay"
@@ -1192,7 +1242,9 @@ def build_assurance_preview(
         fixture=fixture,
     )
     presented_trace = _tamper_trace(trace) if scenario == "tampered-trace" else trace
-    assurance = validate_assurance(receipt, presented_trace, payment_result, policy_allowed=policy_allowed)
+    structural = _validate_receipt_layers(receipt) if receipt is not None else []
+    assurance = validate_assurance(receipt, presented_trace, payment_result,
+                                   policy_allowed=policy_allowed, structural=structural)
     gates_passed = eval_status == "pass" and policy_allowed
     attested = eval_status == "pass" and policy_allowed
     settlement = chain.settle_match(trace, gates_passed, attested, "fixture-operator", "arena-referee", 100_000_000)
@@ -1246,7 +1298,7 @@ def build_assurance_preview(
         },
         "trace": presented_trace,
         "receipt": receipt,
-        "receiptArtifact": _receipt_artifact(receipt, assurance["decision"]),
+        "receiptArtifact": _receipt_artifact(receipt, assurance["decision"], structural),
         "settlement": settlement,
         "assertions": [
             {
