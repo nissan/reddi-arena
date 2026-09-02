@@ -753,6 +753,18 @@ def _request_envelope(trace: dict, scenario: str) -> dict:
     }
 
 
+def _observed_result(payment_result: dict) -> dict:
+    """The verify result that actually observed a transfer, else empty.
+
+    A replay rejection still had a real first observation; every other failure
+    has none, and the receipt must not invent one.
+    """
+    if payment_result.get("ok"):
+        return payment_result
+    first = _as_dict(payment_result.get("firstAttempt"))
+    return first if first.get("ok") else {}
+
+
 def _settlement_proof(observation: dict) -> dict:
     """Settlement proof built only from the payment observation.
 
@@ -785,16 +797,13 @@ def _build_receipt(
     eval_status: str = "pass",
     duplicate_payment: bool = False,
     policy_allowed: bool = True,
+    fixture: dict | None = None,
 ) -> dict:
-    fixture = load_payment_fixture()
+    fixture = fixture if fixture is not None else load_payment_fixture()
     expected = fixture["expected"]
-    # A replay rejection still had a real first observation; every other failure
-    # has none, and the settlement proof below must not invent one.
-    observation = _as_dict(
-        payment_result.get("observation")
-        if payment_result.get("ok")
-        else _as_dict(payment_result.get("firstAttempt")).get("observation")
-    )
+    observed = _observed_result(payment_result)
+    observation = _as_dict(observed.get("observation"))
+    replay_key = observed.get("replayKey")
     amount = int(expected["amountBaseUnits"])
     payer = expected["authority"]
     payee = expected["payTo"]
@@ -900,7 +909,7 @@ def _build_receipt(
         },
         "replayIdempotency": {
             "receiptId": "receipt:" + _sha256_text(request_id)[:24],
-            "idempotencyKey": f"{expected['signature']}:0:{request_id}",
+            "idempotencyKey": f"{replay_key}:{request_id}" if replay_key else None,
             "requestHash": request["requestHash"],
             "nonce": expected.get("paymentIntentId", "fixture-audd-intent"),
             "priorPaymentResponseHashes": prior,
@@ -1087,8 +1096,7 @@ def validate_assurance(receipt: dict | None, trace: dict, payment_result: dict, 
     return {"decision": decision, "diagnostics": diagnostics}
 
 
-def _scenario_fixture(scenario: str) -> tuple[dict, dict | None]:
-    fixture = load_payment_fixture()
+def _scenario_fixture(scenario: str, fixture: dict) -> tuple[dict, dict | None]:
     parsed = copy.deepcopy(fixture["parsedTransaction"])
     expected = copy.deepcopy(fixture["expected"])
     replay_store = None
@@ -1100,28 +1108,40 @@ def _scenario_fixture(scenario: str) -> tuple[dict, dict | None]:
         _set_path(parsed, ("meta", "postTokenBalances", 0, "owner"), expected["authority"])
     elif scenario == "duplicate-replay":
         replay_store = ReplayStore()
-    return {"expected": expected, "parsedTransaction": parsed, "fixtureBoundary": fixture["boundary"]}, replay_store
+    return {"expected": expected, "parsedTransaction": parsed}, replay_store
 
 
-def _payment_for_scenario(scenario: str) -> tuple[dict, dict | None]:
-    fixture, replay_store = _scenario_fixture(scenario)
+def _payment_for_scenario(scenario: str, fixture: dict | None = None) -> tuple[dict, dict | None]:
+    fixture = fixture if fixture is not None else load_payment_fixture()
+    case, replay_store = _scenario_fixture(scenario, fixture)
     if scenario == "authorization-denied":
         return _no_payment_attempt("authorization_denied", "policy denied before payment preparation; no payment observation exists"), None
     if scenario == "duplicate-replay" and replay_store is not None:
-        first = verify_spl_transfer_checked_fixture(fixture["parsedTransaction"], fixture["expected"], replay_store=replay_store)
-        second = verify_spl_transfer_checked_fixture(fixture["parsedTransaction"], fixture["expected"], replay_store=replay_store)
+        first = verify_spl_transfer_checked_fixture(case["parsedTransaction"], case["expected"], replay_store=replay_store)
+        second = verify_spl_transfer_checked_fixture(case["parsedTransaction"], case["expected"], replay_store=replay_store)
         second["firstAttempt"] = first
         return second, replay_store
-    return verify_spl_transfer_checked_fixture(fixture["parsedTransaction"], fixture["expected"]), replay_store
+    return verify_spl_transfer_checked_fixture(case["parsedTransaction"], case["expected"]), replay_store
 
 
 def _receipt_artifact(receipt: dict | None, decision: str) -> dict:
-    """What the emitted JSON actually is, so no surface calls it a receipt early."""
+    """What the emitted JSON actually is, read off the document, not the verdict.
+
+    A receipt whose payment was genuinely observed and whose evidence layers are
+    canonically complete stays a receipt even when assurance refuses it: the
+    refusal is semantic (eval failed, replay, tampered trace), not structural.
+    Only unobserved or canonically incomplete evidence is an invalid candidate.
+    """
     if receipt is None:
         return {"kind": "not-emitted", "label": "no receipt candidate (denied before payment)"}
+    observed = _get_path(receipt, "payment", "paymentProofRef") is not None
+    if not observed or _validate_receipt_layers(receipt):
+        return {"kind": "invalid-candidate", "label": "invalid RAP Assurance receipt candidate"}
     if decision == "accept":
         return {"kind": "receipt", "label": "RAP Assurance receipt"}
-    return {"kind": "invalid-candidate", "label": "invalid RAP Assurance receipt candidate"}
+    if decision == "hold":
+        return {"kind": "verified-rejected-receipt", "label": "verified RAP Assurance receipt — held, not accepted"}
+    return {"kind": "verified-rejected-receipt", "label": "verified RAP Assurance receipt — rejected, not accepted"}
 
 
 def _tamper_trace(trace: dict) -> dict:
@@ -1157,7 +1177,8 @@ def build_assurance_preview(
         entered_a=entered_a,
         entered_b=entered_b,
     )
-    payment_result, _ = _payment_for_scenario(scenario)
+    fixture = load_payment_fixture()
+    payment_result, _ = _payment_for_scenario(scenario, fixture)
     policy_allowed = scenario != "authorization-denied"
     eval_status = "failed" if scenario == "refund-gate-failed" else "pass"
     duplicate = scenario == "duplicate-replay"
@@ -1168,6 +1189,7 @@ def build_assurance_preview(
         eval_status=eval_status,
         duplicate_payment=duplicate,
         policy_allowed=policy_allowed,
+        fixture=fixture,
     )
     presented_trace = _tamper_trace(trace) if scenario == "tampered-trace" else trace
     assurance = validate_assurance(receipt, presented_trace, payment_result, policy_allowed=policy_allowed)
@@ -1192,7 +1214,6 @@ def build_assurance_preview(
                        "attestationConfirmed": False, "winner": trace.get("winner")},
         })
 
-    fixture = load_payment_fixture()
     return {
         "previewFormat": PREVIEW_FORMAT_VERSION,
         "label": "Solana Devnet Preview — local fixture, not externally deployed",

@@ -65,15 +65,31 @@ The preview catalog is returned by `GET /api/assurance/scenarios`.
 | `refund-gate-failed` | rejected for reputation/payout; projected settlement refund |
 | `authorization-denied` | blocked before payment; no receipt is emitted |
 
-When the payment observation does not verify, the emitted JSON is an **invalid
-receipt candidate**, not a receipt — `receiptArtifact.kind` says so and the UI
-labels it that way. Its `settlementProgramProof` omits every observable field
-and its `payment.paymentProofRef` / `payment.amount` are null rather than
-restating the expected transfer, so the canonical
-`rap_receipt.settlement.invalid` diagnostic reports incomplete settlement
-evidence. Semantic cross-checks never run on an incomplete layer, so the
-candidate is never accused of a mismatch against a field that was simply never
-observed.
+`receiptArtifact.kind` classifies the emitted JSON from the document itself —
+whether a payment was actually observed and whether the evidence layers are
+canonically complete — never from the assurance verdict alone, and the UI
+labels it with that classification:
+
+| `kind` | Meaning |
+|---|---|
+| `receipt` | Observed payment, complete layers, assurance accepted |
+| `verified-rejected-receipt` | Observed payment and complete layers, but assurance rejected or held on semantic grounds (`rap_receipt.eval.failed`, `.replay.duplicate_payment`, a tampered trace) |
+| `invalid-candidate` | No verified observation or canonically incomplete layers |
+| `not-emitted` | Denied before payment; no candidate exists |
+
+When the payment observation does not verify, the artifact is an
+`invalid-candidate`. Its `settlementProgramProof` omits every observable field,
+its `payment.paymentProofRef` / `payment.amount` are null, and its
+`replayIdempotency.idempotencyKey` is absent rather than restating the expected
+transfer, so the canonical `rap_receipt.settlement.invalid` and
+`rap_receipt.replay.invalid` diagnostics report incomplete evidence. Semantic
+cross-checks never run on an incomplete layer, so the candidate is never
+accused of a mismatch against a field that was simply never observed.
+
+When a payment *was* observed, `replayIdempotency.idempotencyKey` extends the
+verifier's own consume-once replay key — network, signature, and the exact
+matched outer or inner instruction index — so an inner-instruction fixture
+never claims index `0`.
 
 ## What is simulated, read-only, blocked, or approval-gated
 

@@ -1739,6 +1739,76 @@ check("an accepted scenario is labelled a receipt and a denied one is not emitte
       and assurance.build_assurance_preview(
           DEF, RAID, scenario="authorization-denied", seed=2)["receiptArtifact"]["kind"]
       == "not-emitted")
+
+# A semantic refusal (failed eval, replay, tampered trace) leaves a genuinely
+# observed, canonically complete receipt. Calling that an invalid candidate
+# would erase the structural-vs-semantic distinction the preview teaches.
+for _case in ("refund-gate-failed", "duplicate-replay", "tampered-trace"):
+    _b = assurance.build_assurance_preview(DEF, RAID, scenario=_case, seed=2)
+    _art = _b["receiptArtifact"]
+    check(f"{_case} keeps its verified receipt but is never labelled accepted",
+          _art["kind"] == "verified-rejected-receipt"
+          and "not accepted" in _art["label"]
+          and _b["receipt"]["payment"]["paymentProofRef"] is not None
+          and _b["adapters"]["receiptIntegrity"]["result"]["decision"] != "accept")
+# botA == botB is reachable through the public core API and yields a `hold`.
+_held = assurance.build_assurance_preview(DEF, DEF, scenario="valid-receipt", seed=2)
+check("a held decision keeps its verified receipt and says held, not accepted",
+      _held["adapters"]["receiptIntegrity"]["result"]["decision"] == "hold"
+      and _held["receiptArtifact"]["kind"] == "verified-rejected-receipt"
+      and "held" in _held["receiptArtifact"]["label"])
+
+# replayIdempotency is the consume-once identity layer: it must extend the
+# verifier's own replay key, not restate an assumed instruction index.
+_inner_fixture = _json_ass.loads(_json_ass.dumps(assurance.load_payment_fixture()))
+_transfer_ix = _inner_fixture["parsedTransaction"]["transaction"]["message"]["instructions"].pop(0)
+_inner_fixture["parsedTransaction"]["meta"]["innerInstructions"] = [
+    {"index": 1, "instructions": [_transfer_ix]}]
+_inner = assurance.verify_spl_transfer_checked_fixture(
+    _inner_fixture["parsedTransaction"], _inner_fixture["expected"])
+check("an inner-instruction transfer is observed at its real nested index",
+      _inner["ok"] and _inner["observation"]["instructionIndex"] == "1.0"
+      and _inner["observation"]["innerInstruction"] is True
+      and _inner["replayKey"].endswith(":1.0"))
+_inner_receipt = assurance._build_receipt(
+    _valid["trace"], _inner, "valid-receipt", fixture=_inner_fixture)
+check("an inner-instruction receipt's idempotency key carries 1.0, never 0",
+      _inner_receipt["replayIdempotency"]["idempotencyKey"].startswith(_inner["replayKey"] + ":")
+      and ":0:" not in _inner_receipt["replayIdempotency"]["idempotencyKey"])
+_valid_obs, _ = assurance._payment_for_scenario("valid-receipt")
+check("an observed receipt's idempotency key extends the verifier's replay key",
+      _valid["receipt"]["replayIdempotency"]["idempotencyKey"]
+      == f"{_valid_obs['replayKey']}:{_valid['receipt']['request']['requestId']}")
+_dup_replay = assurance.build_assurance_preview(DEF, RAID, scenario="duplicate-replay", seed=2)
+check("a replay-rejected receipt still names the first attempt's consume-once identity",
+      _dup_replay["receipt"]["replayIdempotency"]["idempotencyKey"].startswith(
+          _valid_obs["replayKey"] + ":"))
+for _case in ("wrong-mint", "wrong-payee"):
+    _b = assurance.build_assurance_preview(DEF, RAID, scenario=_case, seed=2)
+    check(f"{_case} claims no consume-once identity for a transfer never observed",
+          _b["receipt"]["replayIdempotency"]["idempotencyKey"] is None
+          and "rap_receipt.replay.invalid"
+          in {d["code"] for d in _b["adapters"]["receiptIntegrity"]["result"]["diagnostics"]})
+
+# One request reads and validates the fixture exactly once; a fixture that
+# changes mid-request cannot alter the bundle that request already committed to.
+_real_loader = assurance.load_payment_fixture
+_load_calls = []
+_mutated = _json_ass.loads(_json_ass.dumps(assurance.load_payment_fixture()))
+_mutated["expected"]["amountBaseUnits"] = "9999999"
+def _counting_loader():
+    _load_calls.append(1)
+    return _real_loader() if len(_load_calls) == 1 else _json_ass.loads(_json_ass.dumps(_mutated))
+try:
+    assurance.load_payment_fixture = _counting_loader
+    _once = assurance.build_assurance_preview(DEF, RAID, scenario="valid-receipt", seed=2)
+finally:
+    assurance.load_payment_fixture = _real_loader
+check("one preview request loads and validates the fixture exactly once",
+      len(_load_calls) == 1)
+check("a fixture changed mid-request cannot alter the committed bundle",
+      _once["receipt"] == _valid["receipt"]
+      and "9999999" not in _json_ass.dumps(_once))
 _dup = assurance.build_assurance_preview(DEF, RAID, scenario="duplicate-replay", seed=2)
 check("duplicate-replay keeps the first observation's real settlement and rejects on replay",
       _dup["receipt"]["settlementProgramProof"]["confirmationStatus"] == "confirmed"
