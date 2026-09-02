@@ -702,6 +702,88 @@ check("GE02 epic body embeds the marker and its sub-issue references",
       "<!-- graph-epic: E01 -->" in _ge02_body(_ge02["epics"][0])
       and "#1" in _ge02_body(_ge02["epics"][0]))
 
+print("generated-prompt guidance pointer migration")
+# spdd/prompt artifacts are SEEDED by tools/generate_prompts.py and then
+# hand-maintained: Sync Log rows, completed DoD checkmarks and issue metadata are
+# node evidence AGENTS.md requires to exist, and a full regeneration destroys
+# them. So moving the guidance pointer uses a narrow migration mode that must
+# rewrite exactly one span per file and preserve every other byte.
+import shutil as _shutil_gp
+import tempfile as _tempfile_gp
+from pathlib import Path as _Path_gp
+import generate_prompts as _gp
+
+_gp_plan, _gp_failures, _gp_stats = _gp.plan_graph()
+_gp_by_id = {i["id"]: (i, e) for e in _gp_plan["epics"] for i in e["issues"]}
+_gp_names = _gp.generated_artifact_names(_gp_stats, _gp_by_id)
+check("the migration targets only generated artifacts, never the kickoff record",
+      len(_gp_names) == 36 and "0001-project-kickoff.md" not in _gp_names
+      and all((ROOT / "spdd" / "prompt" / n).is_file() for n in _gp_names))
+
+# Golden before/after: a checked-in artifact reverted to the legacy pointer must
+# come back byte-identical to the checked-in file.
+_gp_dir = _Path_gp(_tempfile_gp.mkdtemp(prefix="arena-pointer-migration-"))
+_gp_sample = _gp_names[0]
+_gp_after = (ROOT / "spdd" / "prompt" / _gp_sample).read_text()
+_gp_before = _gp_after.replace(_gp.guidance_pointer(_gp.GUIDANCE_DOC),
+                               _gp.guidance_pointer("CLAUDE.md"), 1)
+check("the golden 'before' really differs only in the pointer document",
+      _gp_before != _gp_after
+      and _gp_before.replace("CLAUDE.md", "AGENTS.md", 1) == _gp_after)
+(_gp_dir / _gp_sample).write_text(_gp_before)
+_gp_changed, _gp_already = _gp.migrate_guidance_pointer(_gp_dir, [_gp_sample])
+check("migrating a legacy artifact reproduces the checked-in bytes exactly",
+      _gp_changed == [_gp_sample] and not _gp_already
+      and (_gp_dir / _gp_sample).read_text() == _gp_after)
+# Idempotence: a second run is a no-op and leaves the bytes untouched.
+_gp_changed2, _gp_already2 = _gp.migrate_guidance_pointer(_gp_dir, [_gp_sample])
+check("a second migration run changes nothing (idempotent)",
+      not _gp_changed2 and _gp_already2 == [_gp_sample]
+      and (_gp_dir / _gp_sample).read_text() == _gp_after)
+# --dry-run reports the work without touching the file.
+(_gp_dir / _gp_sample).write_text(_gp_before)
+_gp_dry, _ = _gp.migrate_guidance_pointer(_gp_dir, [_gp_sample], dry_run=True)
+check("--dry-run reports the rewrite without writing it",
+      _gp_dry == [_gp_sample] and (_gp_dir / _gp_sample).read_text() == _gp_before)
+# Hand-maintained evidence survives: a Sync Log row, a ticked DoD box and an
+# issue number added after generation are all still present afterwards.
+_gp_hand = _gp_before.replace("- [ ] ", "- [x] ", 1) + (
+    "| 2026-08-16 | hand-added divergence row | artifact | code |\n")
+(_gp_dir / _gp_sample).write_text(_gp_hand)
+_gp.migrate_guidance_pointer(_gp_dir, [_gp_sample])
+_gp_out = (_gp_dir / _gp_sample).read_text()
+check("migration preserves hand-maintained Sync Log rows and DoD checkmarks",
+      "2026-08-16 | hand-added divergence row" in _gp_out
+      and "- [x] " in _gp_out
+      and _gp_out == _gp_hand.replace(_gp.guidance_pointer("CLAUDE.md"),
+                                      _gp.guidance_pointer(_gp.GUIDANCE_DOC), 1))
+# Refusals: a file with no recognised pointer, an ambiguous one, or a missing
+# artifact must raise rather than guess at a rewrite.
+_gp_refusals = 0
+for _gp_text in ("no pointer here at all\n",
+                 _gp_before + _gp_after,
+                 _gp_before + _gp_before):
+    (_gp_dir / _gp_sample).write_text(_gp_text)
+    try:
+        _gp.migrate_guidance_pointer(_gp_dir, [_gp_sample])
+    except _gp.PointerMigrationError:
+        _gp_refusals += 1
+    if (_gp_dir / _gp_sample).read_text() != _gp_text:
+        _gp_refusals = -99  # a refused migration must not have written anything
+check("missing and ambiguous pointers refuse without writing", _gp_refusals == 3)
+try:
+    _gp.migrate_guidance_pointer(_gp_dir, ["not-an-artifact.md"])
+    _gp_missing = False
+except _gp.PointerMigrationError:
+    _gp_missing = True
+check("a missing expected artifact refuses the migration", _gp_missing)
+_shutil_gp.rmtree(_gp_dir)
+# The checked-in tree is already migrated, so running the mode over it is a no-op.
+_gp_changed3, _gp_already3 = _gp.migrate_guidance_pointer(
+    ROOT / "spdd" / "prompt", _gp_names, dry_run=True)
+check("every checked-in generated artifact already points at AGENTS.md",
+      not _gp_changed3 and len(_gp_already3) == len(_gp_names))
+
 print("provider abstraction (B3: T-026 T-027 T-028)")
 import yaml as _yaml_b3
 from core.providers import (
@@ -2124,6 +2206,9 @@ import json as _wjson
 
 _os.environ["DATA_DIR"] = _tempfile.mkdtemp(prefix="arena-waitlist-test-")
 _os.environ["ARENA_ADMIN_TOKEN"] = "test-token-123"
+# The Devnet Preview is off unless explicitly opted in, so this instance is the
+# "explicitly enabled" server; the default-off instance is loaded further down.
+_os.environ["REDDI_ENABLE_SOLANA_DEVNET_ASSURANCE_PREVIEW"] = "true"
 _spec = _ilu.spec_from_file_location("arena_server", ROOT / "web" / "server.py")
 _srv = _ilu.module_from_spec(_spec)
 _spec.loader.exec_module(_srv)
@@ -2214,6 +2299,116 @@ check("a corrupt preview fixture is a sanitized 500, not a client-blaming 400",
       _s == 500 and "error" in _b
       and str(_bad_path_api) not in _b["error"]
       and assurance.AUDD_OFFICIAL_SOLANA_MAINNET_MINT not in _b["error"])
+
+print("Devnet Preview exposure flag (default off)")
+# The preview is fixture-only and reaches no wallet/RPC/signing/custody path,
+# but hosting it publicly is separately approval-gated
+# (docs/DEVNET-PREVIEW-RAP-ASSURANCE.md). The server therefore gates it behind
+# REDDI_ENABLE_SOLANA_DEVNET_ASSURANCE_PREVIEW and fails closed on anything but
+# an exact documented opt-in value, so a typo can never expose it.
+check("only the exact documented values enable the preview",
+      all(_srv.preview_enabled(_v) for _v in ("true", "1"))
+      and not any(_srv.preview_enabled(_v) for _v in
+                  (None, "", "True", "TRUE", "yes", "on", "enabled", "y",
+                   " true", "true ", "0", "false", "False", "2", 1, True)))
+check("the enabled instance serves the preview UI and API",
+      _srv.ASSURANCE_PREVIEW_ENABLED
+      and 'data-panel="assurance"' in _srv.arena_page_bytes().decode())
+
+# A second server module loaded with the flag ABSENT is the default every
+# environment gets, including an ordinary Railway redeploy of this tree.
+_preview_env = _os.environ.pop("REDDI_ENABLE_SOLANA_DEVNET_ASSURANCE_PREVIEW")
+_os.environ["DATA_DIR"] = _tempfile.mkdtemp(prefix="arena-preview-off-test-")
+_spec_off = _ilu.spec_from_file_location("arena_server_preview_off",
+                                         ROOT / "web" / "server.py")
+_srv_off = _ilu.module_from_spec(_spec_off)
+_spec_off.loader.exec_module(_srv_off)
+_os.environ["REDDI_ENABLE_SOLANA_DEVNET_ASSURANCE_PREVIEW"] = _preview_env
+_httpd_off = _TServer(("127.0.0.1", 0), _srv_off.Handler)
+_port_off = _httpd_off.server_address[1]
+_threading.Thread(target=_httpd_off.serve_forever, daemon=True).start()
+
+
+def _req_off(method, path, raw=None):
+    """Raw request against the default-off server: returns (status, body bytes)."""
+    r = _urequest.Request(f"http://127.0.0.1:{_port_off}{path}", method=method, data=raw)
+    if raw is not None:
+        r.add_header("Content-Type", "application/json")
+    try:
+        resp = _urequest.urlopen(r, timeout=10)
+        return resp.status, resp.read()
+    except _uerror.HTTPError as e:
+        return e.code, e.read()
+
+
+check("default off: the flag is absent, so the preview is disabled",
+      not _srv_off.ASSURANCE_PREVIEW_ENABLED)
+_s_off, _ = _req_off("POST", "/api/assurance",
+                     _wjson.dumps({"botA": "antweight-vault-defender.adl.yaml",
+                                   "botB": "antweight-vault-raider.adl.yaml",
+                                   "scenario": "valid-receipt"}).encode())
+check("default off: POST /api/assurance is 404, like any unknown path",
+      _s_off == 404)
+_s_off, _ = _req_off("GET", "/api/assurance/scenarios")
+check("default off: the scenario catalog is 404", _s_off == 404)
+# Route order: the gate runs BEFORE the body is parsed and before any fixture is
+# read, so a malformed or oversized body still answers 404 rather than 400/413,
+# and a corrupt fixture cannot produce a 500 from a disabled route.
+check("default off: a malformed body still gets 404, not a 400 body parse error",
+      _req_off("POST", "/api/assurance", b"{not json")[0] == 404)
+check("default off: an oversized body still gets 404, not 413",
+      _req_off("POST", "/api/assurance",
+               b'{"x":"' + b"z" * (70 * 1024) + b'"}')[0] == 404)
+_real_off = _srv_off.assurance.FIXTURE_PATH
+try:
+    _srv_off.assurance.FIXTURE_PATH = Path("/nonexistent/assurance-fixture.json")
+    _s_off, _ = _req_off("POST", "/api/assurance", b'{"scenario":"valid-receipt"}')
+finally:
+    _srv_off.assurance.FIXTURE_PATH = _real_off
+check("default off: no fixture is read, so a broken fixture is still 404",
+      _s_off == 404)
+# UI absence: the tab, the panel and every client-side hook are removed from the
+# served document, not merely hidden with CSS.
+_s_off, _page_off = _req_off("GET", "/play")
+_page_off = _page_off.decode()
+check("default off: /play omits the Devnet Preview tab, panel and client code",
+      _s_off == 200
+      and 'data-panel="assurance"' not in _page_off
+      and 'id="assurance"' not in _page_off
+      and "Devnet Preview" not in _page_off
+      and "/api/assurance" not in _page_off
+      and "bootAssurance" not in _page_off)
+check("default off: the rest of the arena page is untouched",
+      all(f'data-panel="{_t}"' in _page_off
+          for _t in ("fight", "market", "board", "build", "chain"))
+      and 'id="fightBtn"' in _page_off)
+check("default off: /index.html serves the same stripped arena page",
+      _req_off("GET", "/index.html")[1].decode() == _page_off)
+# Stripping is fail-loud: an unpaired marker is a defect, never a page that is
+# half-stripped and still wired to a removed panel.
+_unpaired = 0
+for _frag in ("<!-- devnet-preview:begin -->x", "x<!-- devnet-preview:end -->",
+              "/* devnet-preview:begin */x", "x/* devnet-preview:end */"):
+    try:
+        _srv_off.strip_preview_markup(_frag)
+    except RuntimeError:
+        _unpaired += 1
+check("an unpaired preview marker raises instead of serving a broken page",
+      _unpaired == 4)
+# Deploy config: nothing in the image or the Railway service definition sets the
+# flag, so an ordinary redeploy of this tree keeps the preview off. The image
+# does ship the fixtures the preview needs once an operator opts in.
+_railway_cfg = (ROOT / "railway.json").read_text()
+_dockerfile = (ROOT / "Dockerfile").read_text()
+_dockerignore = (ROOT / ".dockerignore").read_text()
+check("an ordinary Railway redeploy does not set the preview flag",
+      "REDDI_ENABLE_SOLANA_DEVNET_ASSURANCE_PREVIEW" not in _railway_cfg
+      and not _re.search(r"^\s*(ENV|ARG)\s+REDDI_ENABLE_SOLANA_DEVNET_ASSURANCE_PREVIEW",
+                         _dockerfile, _re.M))
+check("the image ships the assurance fixtures the preview needs when enabled",
+      "COPY fixtures/assurance/" in _dockerfile
+      and "!fixtures/assurance" in _dockerignore
+      and "\nfixtures/\n" not in _dockerignore)
 
 _s, _b = _req("POST", "/api/waitlist", {"email": "Player@Example.com", "roles": ["compete"]})
 check("waitlist signup works and normalizes case", _s == 200 and _b["ok"] and _b["position"] == 1)

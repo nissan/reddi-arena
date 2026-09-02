@@ -1347,7 +1347,11 @@ def build_assurance_preview(
 
     return {
         "previewFormat": PREVIEW_FORMAT_VERSION,
-        "label": "Solana Devnet Preview — local fixture, not externally deployed",
+        # Stays truthful whether the preview is served locally or, once an
+        # operator sets REDDI_ENABLE_SOLANA_DEVNET_ASSURANCE_PREVIEW, from a
+        # hosted deploy: the fixture claim holds in both, "not externally
+        # deployed" would not.
+        "label": "Solana Devnet Preview — deterministic fixture, no live value",
         "scenario": {"id": scenario, **SCENARIOS[scenario]},
         "boundary": dict(BOUNDARY_FLAGS),
         "canonicalRefs": dict(CANONICAL_REFS),

@@ -34,7 +34,8 @@ python3 cli/arena.py chain antweight-vault-defender.adl.yaml \
 python3 cli/arena.py chain ... --fail-gate    # payout blocked despite a completed match
 python3 cli/arena.py chain ... --no-attest    # dispute instead of payout
 
-# local/public Solana Devnet Preview — RAP Assurance fixtures, writes nothing
+# local Solana Devnet Preview — RAP Assurance fixtures, writes nothing.
+# Off by default; start the server with the flag to reach it (see Web, below).
 curl -s http://127.0.0.1:8000/api/assurance/scenarios
 ```
 
@@ -42,6 +43,9 @@ curl -s http://127.0.0.1:8000/api/assurance/scenarios
 
 ```bash
 python3 web/server.py 8000
+
+# with the Solana Devnet Preview tab (off by default, exact value required)
+REDDI_ENABLE_SOLANA_DEVNET_ASSURANCE_PREVIEW=true python3 web/server.py 8000
 ```
 
 | Route | What it is |
@@ -52,10 +56,12 @@ python3 web/server.py 8000
 Waitlist emails are stored locally in `core/waitlist.json`. There is no account
 system and no published retention policy — the landing page says so plainly.
 
-Six tabs: **The Arena** (weigh in, draft, fight, coached replay), **Devnet
-Preview** (local RAP Assurance receipt and tamper/replay fixtures), **Power-Up
+Five tabs: **The Arena** (weigh in, draft, fight, coached replay), **Power-Up
 Market** (specialists for hire), **Leaderboard**, **Build a Power-Up** (the ADL
-shape for sellers), **On-Chain** (the Solana projection).
+shape for sellers), **On-Chain** (the Solana projection). A sixth, **Devnet
+Preview** (local RAP Assurance receipt and tamper/replay fixtures), appears only
+when `REDDI_ENABLE_SOLANA_DEVNET_ASSURANCE_PREVIEW` is set — boundaries and the
+exact accepted values are in `docs/DEVNET-PREVIEW-RAP-ASSURANCE.md`.
 
 ## Tests
 

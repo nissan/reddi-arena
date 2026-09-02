@@ -53,6 +53,54 @@ PERSISTENT = bool(os.environ.get("DATA_DIR"))
 # not exist (404), so the deploy fails closed rather than open.
 ADMIN_TOKEN = os.environ.get("ARENA_ADMIN_TOKEN", "")
 
+# Solana Devnet Preview (RAP Assurance) exposure gate. The preview is
+# fixture-only and reaches no wallet, RPC, signing, submission or custody path,
+# but hosting it publicly is a separately approval-gated action
+# (docs/DEVNET-PREVIEW-RAP-ASSURANCE.md), so it is OFF in every environment
+# unless an operator opts in explicitly. Only the exact strings in
+# ASSURANCE_PREVIEW_TRUE_VALUES enable it: no case folding, no whitespace
+# trimming, no truthiness. "True", "yes", "on", " true" and any other malformed
+# value leave it off, so a typo can only ever fail closed.
+ASSURANCE_PREVIEW_FLAG = "REDDI_ENABLE_SOLANA_DEVNET_ASSURANCE_PREVIEW"
+ASSURANCE_PREVIEW_TRUE_VALUES = ("true", "1")
+
+
+def preview_enabled(value) -> bool:
+    """True only for an exact documented opt-in value."""
+    return value in ASSURANCE_PREVIEW_TRUE_VALUES
+
+
+ASSURANCE_PREVIEW_ENABLED = preview_enabled(os.environ.get(ASSURANCE_PREVIEW_FLAG))
+
+# When the preview is off the marked regions of index.html are stripped before
+# the page is served, so the Devnet Preview tab, panel and its client code are
+# absent from the DOM rather than merely hidden.
+PREVIEW_MARKERS = (("<!-- devnet-preview:begin -->", "<!-- devnet-preview:end -->"),
+                   ("/* devnet-preview:begin */", "/* devnet-preview:end */"))
+
+
+def strip_preview_markup(html: str) -> str:
+    """Remove every marked Devnet Preview region, markers included. Raises if a
+    marker is left unpaired: a half-stripped page is a defect, not a fallback."""
+    for begin, end in PREVIEW_MARKERS:
+        while begin in html:
+            start = html.index(begin)
+            stop = html.find(end, start)
+            if stop < 0:
+                raise RuntimeError(f"unpaired preview marker: {begin}")
+            html = html[:start] + html[stop + len(end):]
+        if end in html:
+            raise RuntimeError(f"unpaired preview marker: {end}")
+    return html
+
+
+def arena_page_bytes() -> bytes:
+    """The /play document, with the preview stripped unless it is enabled."""
+    html = (ROOT / "web" / "static" / "index.html").read_text()
+    return (html if ASSURANCE_PREVIEW_ENABLED
+            else strip_preview_markup(html)).encode()
+
+
 # --- Hardening limits for the public surface --------------------------------
 # The service is internet-exposed on Railway with a persistent /data volume, so
 # every unauthenticated write path is bounded.
@@ -388,12 +436,11 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = urlparse(self.path).path
-        if path in ("/", "/index.html", "/landing", "/landing.html"):
-            page = "landing.html" if path in ("/", "/landing", "/landing.html") else "index.html"
-            return self._send((ROOT / "web" / "static" / page).read_bytes(), ctype="text/html")
-        if path in ("/play", "/arena", "/app"):
-            return self._send((ROOT / "web" / "static" / "index.html").read_bytes(),
+        if path in ("/", "/landing", "/landing.html"):
+            return self._send((ROOT / "web" / "static" / "landing.html").read_bytes(),
                               ctype="text/html")
+        if path in ("/index.html", "/play", "/arena", "/app"):
+            return self._send(arena_page_bytes(), ctype="text/html")
         if path == "/api/meta":
             return self._send({"currency": ARENA_CURRENCY, "rail": ARENA_RAIL,
                                "persistent": PERSISTENT,
@@ -405,6 +452,8 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/market":
             return self._send(mercs())
         if path == "/api/assurance/scenarios":
+            if not ASSURANCE_PREVIEW_ENABLED:
+                return self._send({"error": "not found"}, 404)
             return self._send(assurance.scenario_catalog())
         if path == "/api/leaderboard":
             return self._send(leaderboard())
@@ -431,6 +480,11 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = urlparse(self.path).path
+        # The preview gate is checked BEFORE the body is read and before any
+        # fixture is touched: with the flag off, /api/assurance is
+        # indistinguishable from an unknown path.
+        if path == "/api/assurance" and not ASSURANCE_PREVIEW_ENABLED:
+            return self._send({"error": "not found"}, 404)
         req, err = self._read_body()
         if err:
             return

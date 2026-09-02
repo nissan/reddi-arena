@@ -14,6 +14,11 @@ COPY web/ ./web/
 COPY adl/ ./adl/
 COPY tools/ ./tools/
 COPY vendor/ ./vendor/
+# The Devnet Preview is off unless an operator sets
+# REDDI_ENABLE_SOLANA_DEVNET_ASSURANCE_PREVIEW, but its deterministic fixtures
+# must be in the image so enabling it serves the preview instead of a fixture
+# integrity 500. They are data only — no key, wallet, or live-rail material.
+COPY fixtures/assurance/ ./fixtures/assurance/
 
 # Ephemeral by default. Mount a Railway volume and set DATA_DIR=/data to make
 # the leaderboard and waitlist survive redeploys.

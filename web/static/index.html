@@ -184,7 +184,9 @@
 
 <nav class="tabs"><div class="tabrow" role="tablist">
   <button class="tab" role="tab" aria-selected="true" data-panel="fight">The Arena</button>
+  <!-- devnet-preview:begin -->
   <button class="tab" role="tab" aria-selected="false" data-panel="assurance">Devnet Preview</button>
+  <!-- devnet-preview:end -->
   <button class="tab" role="tab" aria-selected="false" data-panel="market">Power-Up Market</button>
   <button class="tab" role="tab" aria-selected="false" data-panel="board">Leaderboard</button>
   <button class="tab" role="tab" aria-selected="false" data-panel="build">Build a Power-Up</button>
@@ -216,11 +218,12 @@
     <div id="fightOut" style="margin-top:20px"></div>
   </section>
 
+  <!-- devnet-preview:begin -->
   <!-- DEVNET PREVIEW / RAP ASSURANCE -->
   <section class="panel" id="assurance" aria-labelledby="assuranceTitle">
     <h2 class="sec" id="assuranceTitle">Solana Devnet Preview — RAP Assurance</h2>
     <p class="mini" style="max-width:760px">
-      Local/public preview only, <b>not externally deployed</b>. Choose ADL-defined
+      Preview only, <b>off unless an operator explicitly enables it</b>. Choose ADL-defined
       agents, tweak the seed or fixture scenario, and inspect how RAP Assurance
       checks paid-work evidence. The payment fixture proves only transfer metadata;
       RAP Assurance checks the payment together with authority, authorization,
@@ -239,6 +242,7 @@
     <button class="act" id="assuranceBtn">Run RAP Assurance preview</button>
     <div id="assuranceOut" role="status" aria-live="polite" style="margin-top:20px"></div>
   </section>
+  <!-- devnet-preview:end -->
 
   <!-- MARKET -->
   <section class="panel" id="market">
@@ -322,18 +326,15 @@ async function boot(){
   $('#railBadge').textContent='rail: '+META.rail;
   BOTS=await (await fetch('/api/bots')).json();
   MERCS=await (await fetch('/api/market')).json();
-  ASSURANCE=await (await fetch('/api/assurance/scenarios')).json();
   fillSelect('#botA',BOTS,b=>`${b.name} · ${b.au}AU ${b.class}`);
   fillSelect('#botB',BOTS,b=>`${b.name} · ${b.au}AU ${b.class}`,1);
-  fillSelect('#assureBotA',BOTS,b=>`${b.name} · ${b.au}AU ${b.class}`);
-  fillSelect('#assureBotB',BOTS,b=>`${b.name} · ${b.au}AU ${b.class}`,1);
-  fillScenarioSelect();
   const none=document.createElement('option');none.value='';none.textContent='— none —';
   const hs=$('#hireA');hs.appendChild(none);
-  const none2=none.cloneNode(true);const ahs=$('#assureHireA');ahs.appendChild(none2);
   MERCS.forEach(m=>{const o=document.createElement('option');o.value=m.id;
-    o.textContent=`${m.name} · +${m.grants.defenseBonus||0} def · ${m.price.amount} cr`;hs.appendChild(o);
-    ahs.appendChild(o.cloneNode(true));});
+    o.textContent=`${m.name} · +${m.grants.defenseBonus||0} def · ${m.price.amount} cr`;hs.appendChild(o);});
+  /* devnet-preview:begin */
+  await bootAssurance();
+  /* devnet-preview:end */
   renderMarket(); loadBoard();
   ['#botA','#hireA'].forEach(s=>$(s).addEventListener('change',updateScale));
   updateScale();
@@ -341,9 +342,24 @@ async function boot(){
 function fillSelect(sel,items,label,idx=0){const el=$(sel);el.innerHTML='';
   items.forEach((it,i)=>{const o=document.createElement('option');o.value=it.id;o.textContent=label(it);
     if(i===idx)o.selected=true;el.appendChild(o);});}
+/* devnet-preview:begin */
+// Every Devnet Preview control lives in one strippable block: with
+// REDDI_ENABLE_SOLANA_DEVNET_ASSURANCE_PREVIEW off, the server removes this
+// along with the tab and panel, so nothing here can reference a missing node.
+async function bootAssurance(){
+  ASSURANCE=await (await fetch('/api/assurance/scenarios')).json();
+  fillSelect('#assureBotA',BOTS,b=>`${b.name} · ${b.au}AU ${b.class}`);
+  fillSelect('#assureBotB',BOTS,b=>`${b.name} · ${b.au}AU ${b.class}`,1);
+  fillScenarioSelect();
+  const none=document.createElement('option');none.value='';none.textContent='— none —';
+  const ahs=$('#assureHireA');ahs.appendChild(none);
+  MERCS.forEach(m=>{const o=document.createElement('option');o.value=m.id;
+    o.textContent=`${m.name} · +${m.grants.defenseBonus||0} def · ${m.price.amount} cr`;ahs.appendChild(o);});
+}
 function fillScenarioSelect(){const el=$('#assureScenario');el.innerHTML='';
   (ASSURANCE.scenarios||[]).forEach(s=>{const o=document.createElement('option');o.value=s.id;
     o.textContent=`${s.title} · expect ${s.expect}`;el.appendChild(o);});}
+/* devnet-preview:end */
 
 async function updateScale(){
   const botId=$('#botA').value, hireId=$('#hireA').value;
@@ -427,6 +443,7 @@ function renderMatch(t){
     <div class="note">trace hash ${t.traceHash.slice(0,24)}… — same seed always replays identically</div>`;
 }
 
+/* devnet-preview:begin */
 async function runAssurance(){
   const body={botA:$('#assureBotA').value,botB:$('#assureBotB').value,
     hireA:$('#assureHireA').value||null,hireB:null,seed:+$('#assureSeed').value,
@@ -467,6 +484,7 @@ function renderAssurance(b){
     <details class="receipt-json"><summary>Inspect ${esc(artifact.label)} JSON</summary><pre>${esc(JSON.stringify(b.receipt||{receipt:'not emitted for this denied path'},null,2))}</pre></details>
     <div class="coach"><b>Contribute verification fixtures</b>Add deterministic parsed-payment or receipt fixtures under <code>${esc(b.contribution.fixtures)}</code>, document the simulated/read-only/blocked boundary, and prove it through <code>${esc(b.contribution.tests)}</code>. Canonical RAP/ADL semantics stay upstream; Arena only adapts to them.</div>`;
 }
+/* devnet-preview:end */
 
 async function loadBoard(){
   const d=await (await fetch('/api/leaderboard')).json();
@@ -485,7 +503,9 @@ document.querySelectorAll('.tab').forEach(t=>t.addEventListener('click',()=>{
   if(t.dataset.panel==='board')loadBoard();
 }));
 $('#fightBtn').addEventListener('click',fight);
+/* devnet-preview:begin */
 $('#assuranceBtn').addEventListener('click',runAssurance);
+/* devnet-preview:end */
 $('#chainBtn').addEventListener('click',async()=>{
   const r=await (await fetch('/api/chain',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({botA:$('#botA').value,botB:$('#botB').value,seed:+$('#seed').value,

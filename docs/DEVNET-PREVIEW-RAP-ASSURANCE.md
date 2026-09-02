@@ -1,7 +1,13 @@
 # Solana Devnet Preview — RAP Assurance
 
 This is the earliest safe Arena experience for demonstrating RAP Assurance without
-external deployment. It is a local/public preview in `/play` and `/api/assurance`.
+external deployment. It is a preview in `/play` and `/api/assurance`, **off unless
+`REDDI_ENABLE_SOLANA_DEVNET_ASSURANCE_PREVIEW` is set to `true` or `1`** — see
+[what is simulated, read-only, blocked, or approval-gated](#what-is-simulated-read-only-blocked-or-approval-gated).
+
+```bash
+REDDI_ENABLE_SOLANA_DEVNET_ASSURANCE_PREVIEW=true python3 web/server.py 8000
+```
 
 ## What the preview proves
 
@@ -134,16 +140,27 @@ never claims index `0`.
 | Blocked | mainnet, live value, wallets, secrets, signing, custody, RPC, transaction submission, external deployment, official-mint observation, grant evidence |
 | Separately approval-gated | Any real Solana devnet write, live payment, wallet/RPC scope, spend cap, or externally hosted launch |
 
-"Blocked: external deployment" is a statement about this repository's
-actions, not a runtime gate. This change ships no deployment, and shipping the
-hosted preview is an operator action with its own runbook (`docs/OPERATIONS.md`).
-But the preview has no server-side feature flag: once this tree is deployed,
-`/play`'s Devnet Preview tab and `/api/assurance` are reachable at the public
-URL. Every other boundary in the table above still holds when hosted — the
-preview is still fixture-only, with no wallet, RPC, signing, submission, or
-custody path — so deploying it exposes the preview, never live value. Hosting it
-publicly is the "externally hosted launch" that stays separately approval-gated,
-including its messaging.
+"Blocked: external deployment" is enforced twice over. This change ships no
+deployment at all, and the preview is additionally gated at runtime by
+`REDDI_ENABLE_SOLANA_DEVNET_ASSURANCE_PREVIEW` — **off in every environment**
+unless an operator sets it to the exact value `true` or `1`. Absent, `false`,
+and malformed values (`True`, `yes`, `on`, `" true"`) all leave it off, so a
+typo can only fail closed. With the flag off:
+
+- `/play` is served with the Devnet Preview tab, its panel, and its client code
+  removed from the document — absent from the DOM, not hidden with CSS.
+- `POST /api/assurance` and `GET /api/assurance/scenarios` answer `404`,
+  indistinguishable from an unknown path. The gate runs before the request body
+  is parsed and before any fixture is read.
+
+So an ordinary redeploy of this tree — including the operator's existing Railway
+service (`docs/OPERATIONS.md` owns the variable and the deploy steps) — does not
+expose the preview. Enabling it is a separate, operator-approved action with its
+own reviewed messaging: the "externally hosted launch" that stays separately
+approval-gated. Every other boundary in the table above still holds when the
+flag is on — the preview remains fixture-only, with no wallet, RPC, signing,
+submission, or custody path — so enabling it exposes the preview, never live
+value.
 
 ## Contribution path
 

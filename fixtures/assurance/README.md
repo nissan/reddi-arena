@@ -1,6 +1,8 @@
 # RAP Assurance preview fixtures
 
-These fixtures back the local Solana Devnet Preview in `/play`.
+These fixtures back the Solana Devnet Preview in `/play`, which is off unless an
+operator enables it — `docs/DEVNET-PREVIEW-RAP-ASSURANCE.md` owns the flag, the
+boundaries, and the contribution path.
 
 - `audd-transfer-checked.json` is a deterministic parsed `TransferChecked` fixture shaped after the canonical `@reddi/x402-solana` read-only observer tests.
 - Its mint is the canonical `AUDD_DETERMINISTIC_FIXTURE_MINT` sentinel `AUDDdev111111111111111111111111111111111111` on the `deterministic-fixture` rail, labelled `non_eligible` for grant volume.
